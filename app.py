@@ -363,17 +363,25 @@ def build_summary_table_from_row(row: pd.Series) -> pd.DataFrame:
 
 
 def format_summary_for_display(summary_df: pd.DataFrame) -> pd.DataFrame:
-    display_df = summary_df.copy()
+    # Pandas in newer Streamlit Cloud environments is stricter about assigning
+    # strings such as "1,234" or "2.50%" into numeric columns. Keep the raw
+    # summary table numeric for calculations, but cast only the display copy
+    # to object before writing formatted strings.
+    display_df = summary_df.copy().astype(object)
     value_cols = MONTHS + ["Accumulate", "Average"]
+
     for idx in display_df.index:
-        desc = display_df.at[idx, "Description"]
+        desc = str(display_df.at[idx, "Description"]).strip()
+
         if desc in ["Sale", "Total", "total - sale"]:
             for col in value_cols:
                 display_df.at[idx, col] = format_number(display_df.at[idx, col], 0)
+
         elif desc == "losses":
             for col in value_cols:
                 display_df.at[idx, col] = format_percent(display_df.at[idx, col])
-    return display_df
+
+    return display_df.astype(str)
 
 
 def extract_monthly_losses_from_row(row: pd.Series) -> list[float]:
