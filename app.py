@@ -402,6 +402,53 @@ def get_row_from_meta(meta_indexed: pd.DataFrame, cabin_key: str) -> Optional[pd
     return row
 
 
+
+
+def resolve_cabin_text_input(cabin_options_df: pd.DataFrame, cabin_query: str) -> Tuple[Optional[str], str, pd.DataFrame]:
+    """Resolve a typed cabin query into one cabin key.
+
+    Matching order:
+    1) exact cabin key/display name match, case-insensitive
+    2) partial display-name match
+    Returns: selected_key, message, matches_df
+    """
+    query = normalize_text(cabin_query)
+    if query == "":
+        return None, "Type a cabin number/name to open the summary.", pd.DataFrame()
+
+    if cabin_options_df.empty:
+        return None, "No cabins are available under the current filter.", pd.DataFrame()
+
+    query_key = normalize_key(query)
+    working = cabin_options_df.copy()
+    working["__display_key"] = working["display_name"].apply(normalize_key)
+
+    exact = working[(working["__cabin_key"] == query_key) | (working["__display_key"] == query_key)]
+    if not exact.empty:
+        row = exact.iloc[0]
+        return row["__cabin_key"], f"Opened exact match: Cabin {row['display_name']}", pd.DataFrame()
+
+    partial = working[working["__display_key"].str.contains(re.escape(query_key), na=False)].copy()
+    if partial.empty:
+        return None, f"No cabin found for: {query}", pd.DataFrame()
+
+    if len(partial) == 1:
+        row = partial.iloc[0]
+        return row["__cabin_key"], f"Opened partial match: Cabin {row['display_name']}", pd.DataFrame()
+
+    preview_cols = ["display_name", "type", "customers", "rows"]
+    matches_df = partial[preview_cols].head(30).rename(columns={
+        "display_name": "Cabin",
+        "type": "Type",
+        "customers": "Customers",
+        "rows": "Matched Rows",
+    })
+    return None, (
+        f"Your input matches {len(partial)} cabins. Type the exact cabin number/name. "
+        "The first 30 matches are shown below."
+    ), matches_df
+
+
 def build_single_cabin_gap_ranking(cabin_meta: pd.DataFrame, month: str) -> pd.DataFrame:
     if cabin_meta.empty:
         return pd.DataFrame()
@@ -1260,19 +1307,33 @@ if cabin_options_df.empty:
     st.stop()
 
 ranked_default_key = visible_ranking_df.iloc[0]["__cabin_key"] if not visible_ranking_df.empty else cabin_options_df.iloc[0]["__cabin_key"]
-option_keys = cabin_options_df["__cabin_key"].tolist()
-default_index = option_keys.index(ranked_default_key) if ranked_default_key in option_keys else 0
-option_labels = {
-    row["__cabin_key"]: f"{row['display_name']} | {row['type']} | customers {format_number(row['customers'], 0)}"
-    for _, row in cabin_options_df.iterrows()
-}
+default_row = get_row_from_meta(meta_2026_indexed, ranked_default_key)
+default_cabin_text = str(default_row["display_name"]) if default_row is not None else str(cabin_options_df.iloc[0]["display_name"])
 
-selected_cabin_key = st.selectbox(
-    "Open cabin summary",
-    options=option_keys,
-    index=default_index,
-    format_func=lambda key: option_labels.get(key, key),
-)
+st.markdown("### Open cabin summary")
+st.caption("Type the cabin number/name. Exact match opens directly; partial match works only when it finds one cabin.")
+
+col_search, col_hint = st.columns([2, 1])
+with col_search:
+    cabin_query = st.text_input(
+        "Cabin number/name",
+        value=default_cabin_text,
+        placeholder="Example: 1234 or Cabin name",
+        key=f"cabin_search_{province}_{cabin_type_filter}",
+    )
+
+with col_hint:
+    st.metric("Available under filter", len(cabin_options_df))
+
+selected_cabin_key, cabin_message, cabin_matches_df = resolve_cabin_text_input(cabin_options_df, cabin_query)
+
+if selected_cabin_key is None:
+    st.warning(cabin_message)
+    if not cabin_matches_df.empty:
+        st.dataframe(cabin_matches_df, use_container_width=True, hide_index=True)
+    st.stop()
+else:
+    st.success(cabin_message)
 
 selected_row = get_row_from_meta(meta_2026_indexed, selected_cabin_key)
 if selected_row is None:
@@ -1319,7 +1380,7 @@ st.plotly_chart(build_multi_year_loss_chart(loss_by_year), use_container_width=T
 st.markdown("### Sale vs Total — 2026")
 st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_container_width=True)
 
-st.markdown("### Summary Tables")
+st.markdown("### Summary Tables — Same Place, No Separate Tabs")
 for year in [2026, 2025, 2024]:
     st.markdown(f"#### Summary Table ({year})")
     if year in summary_by_year:
