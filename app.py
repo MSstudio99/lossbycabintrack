@@ -803,16 +803,342 @@ def build_export_zip_bytes(
     return zip_buffer.getvalue()
 
 
+
+
+# =========================================================
+# LIGHTWEIGHT REPORT HELPERS
+# =========================================================
+def get_summary_and_loss_for_cabin(
+    year_sources: Dict[int, Dict[str, CsvSource]],
+    province: str,
+    selected_cabin_key: str,
+    data_2026: Dict[str, pd.DataFrame],
+    selected_row_2026: pd.Series,
+) -> Tuple[Dict[int, pd.DataFrame], Dict[int, list[float]], Dict[int, pd.DataFrame], Dict[int, str]]:
+    """Load only the selected province/year data needed for the selected cabin."""
+    summary_by_year: Dict[int, pd.DataFrame] = {}
+    loss_by_year: Dict[int, list[float]] = {}
+    meta_by_year: Dict[int, pd.DataFrame] = {}
+    status_by_year: Dict[int, str] = {}
+
+    meta_by_year[2026] = data_2026["cabin_meta_indexed"]
+    summary_by_year[2026] = build_summary_table_from_row(selected_row_2026)
+    loss_by_year[2026] = extract_monthly_losses_from_row(selected_row_2026)
+    status_by_year[2026] = "OK"
+
+    for year in [2025, 2024]:
+        source = get_year_source(year_sources, year, province)
+        if source is None:
+            status_by_year[year] = f"No {year} CSV found for {province} in repository."
+            meta_by_year[year] = pd.DataFrame()
+            continue
+
+        try:
+            data_year = prepare_source(source)
+            meta_year = data_year["cabin_meta_indexed"]
+            meta_by_year[year] = meta_year
+            row_year = get_row_from_meta(meta_year, selected_cabin_key)
+            if row_year is None:
+                status_by_year[year] = f"Cabin not found in {year}."
+            else:
+                summary_by_year[year] = build_summary_table_from_row(row_year)
+                loss_by_year[year] = extract_monthly_losses_from_row(row_year)
+                status_by_year[year] = "OK"
+        except Exception as exc:
+            status_by_year[year] = f"Could not read {year}: {exc}"
+            meta_by_year[year] = pd.DataFrame()
+
+    return summary_by_year, loss_by_year, meta_by_year, status_by_year
+
+
+def get_value_from_summary(summary_df: pd.DataFrame, description: str, column: str) -> float:
+    try:
+        return float(summary_df.loc[summary_df["Description"] == description, column].iloc[0])
+    except Exception:
+        return 0.0
+
+
+def build_yearly_kpi_table(summary_by_year: Dict[int, pd.DataFrame]) -> pd.DataFrame:
+    rows = []
+    for year in sorted(summary_by_year.keys()):
+        summary = summary_by_year[year]
+        total_acc = get_value_from_summary(summary, "Total", "Accumulate")
+        sale_acc = get_value_from_summary(summary, "Sale", "Accumulate")
+        gap_acc = get_value_from_summary(summary, "total - sale", "Accumulate")
+        weighted_loss = get_value_from_summary(summary, "losses", "Accumulate")
+        avg_loss = get_value_from_summary(summary, "losses", "Average")
+
+        rows.append({
+            "Year": year,
+            "Total kWh": total_acc,
+            "Sale kWh": sale_acc,
+            "Total - Sale": gap_acc,
+            "Weighted Loss %": weighted_loss,
+            "Avg Monthly Loss %": avg_loss,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def format_yearly_kpi_table(kpi_df: pd.DataFrame) -> pd.DataFrame:
+    if kpi_df.empty:
+        return kpi_df
+    out = kpi_df.copy().astype(object)
+    for col in ["Total kWh", "Sale kWh", "Total - Sale"]:
+        out[col] = out[col].map(lambda x: format_number(x, 0))
+    for col in ["Weighted Loss %", "Avg Monthly Loss %"]:
+        out[col] = out[col].map(format_percent)
+    return out.astype(str)
+
+
+def build_loss_comparison_table(
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_by_year: Dict[int, list[float]],
+) -> pd.DataFrame:
+    rows = []
+    for idx, month in enumerate(MONTHS):
+        row = {"Month": month}
+        for year in ALL_YEARS:
+            if year in loss_by_year:
+                row[str(year)] = loss_by_year[year][idx]
+            else:
+                row[str(year)] = None
+        rows.append(row)
+
+    weighted_row = {"Month": "Weighted yearly loss"}
+    average_row = {"Month": "Average monthly loss"}
+    for year in ALL_YEARS:
+        if year in summary_by_year:
+            weighted_row[str(year)] = get_value_from_summary(summary_by_year[year], "losses", "Accumulate")
+            average_row[str(year)] = get_value_from_summary(summary_by_year[year], "losses", "Average")
+        else:
+            weighted_row[str(year)] = None
+            average_row[str(year)] = None
+
+    rows.extend([weighted_row, average_row])
+    return pd.DataFrame(rows)
+
+
+def format_loss_comparison_table(loss_df: pd.DataFrame) -> pd.DataFrame:
+    if loss_df.empty:
+        return loss_df
+    out = loss_df.copy().astype(object)
+    for year in [str(y) for y in ALL_YEARS]:
+        if year in out.columns:
+            out[year] = out[year].map(lambda x: "-" if pd.isna(x) else format_percent(x))
+    return out.astype(str)
+
+
+def build_all_year_summary_csv(summary_by_year: Dict[int, pd.DataFrame]) -> bytes:
+    frames = []
+    for year in sorted(summary_by_year.keys(), reverse=True):
+        temp = summary_by_year[year].copy()
+        temp.insert(0, "Year", year)
+        frames.append(temp)
+    if not frames:
+        return b""
+    combined = pd.concat(frames, ignore_index=True)
+    return combined.to_csv(index=False).encode("utf-8-sig")
+
+
+def build_ranking_csv_bytes(ranking_df: pd.DataFrame) -> bytes:
+    if ranking_df.empty:
+        return b""
+    export_df = ranking_df[[
+        "Rank", "display_name", "rank_total", "rank_sale", "rank_gap", "rank_loss_pct", "customers"
+    ]].rename(columns={
+        "display_name": "Cabin",
+        "rank_total": "Total kWh",
+        "rank_sale": "Sale kWh",
+        "rank_gap": "Total - Sale",
+        "rank_loss_pct": "Loss %",
+        "customers": "Customers",
+    })
+    return export_df.to_csv(index=False).encode("utf-8-sig")
+
+
+def make_generic_table_png_image(
+    display_df: pd.DataFrame,
+    title: str,
+    subtitle: Optional[str] = None,
+    col_widths: Optional[list[int]] = None,
+    row_h: int = 40,
+) -> Image.Image:
+    font_title = get_pil_font(24, bold=True)
+    font_subtitle = get_pil_font(15)
+    font_header = get_pil_font(13, bold=True)
+    font_cell = get_pil_font(13, bold=False)
+
+    headers = display_df.columns.astype(str).tolist()
+    data = [headers] + display_df.astype(str).values.tolist()
+
+    if col_widths is None:
+        col_widths = []
+        for col_idx, header in enumerate(headers):
+            max_len = len(str(header))
+            for row in display_df.astype(str).values.tolist():
+                max_len = max(max_len, len(str(row[col_idx])))
+            col_widths.append(max(105, min(210, max_len * 9 + 28)))
+
+    title_h = 82 if subtitle else 58
+    width = sum(col_widths) + 2
+    height = title_h + row_h * len(data) + 2
+
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle([0, 0, width, title_h], fill="#ffffff")
+    draw.text((12, 14), title, font=font_title, fill="#0f172a")
+    if subtitle:
+        draw.text((12, 48), subtitle[:170], font=font_subtitle, fill="#475569")
+
+    y = title_h
+    for r_idx, row in enumerate(data):
+        x = 0
+        if r_idx == 0:
+            bg, fg, font = "#0f172a", "white", font_header
+        else:
+            bg, fg, font = "#ffffff", "#111827", font_cell
+            if str(row[0]).lower().startswith("weighted") or str(row[0]).lower().startswith("average"):
+                bg, fg, font = "#f8fafc", "#0f172a", get_pil_font(13, bold=True)
+
+        for c_idx, cell in enumerate(row):
+            w = col_widths[c_idx]
+            draw.rectangle([x, y, x + w, y + row_h], fill=bg, outline="#e5e7eb")
+            text = str(cell)
+            if len(text) > 24:
+                text = text[:23] + "…"
+            draw_centered_text(draw, (x + 4, y + 4, x + w - 4, y + row_h - 4), text, font, fg)
+            x += w
+        y += row_h
+
+    return img
+
+
+def make_printable_selected_report_png_bytes(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_by_year: Dict[int, list[float]],
+    yearly_kpi_df: pd.DataFrame,
+    loss_compare_df: pd.DataFrame,
+) -> bytes:
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+
+    kpi_img = make_generic_table_png_image(
+        format_yearly_kpi_table(yearly_kpi_df),
+        title="Yearly KPI Comparison",
+        subtitle=subtitle,
+        col_widths=[85, 150, 150, 150, 150, 160],
+        row_h=42,
+    )
+
+    chart_img = make_loss_curve_png_image(
+        loss_by_year=loss_by_year,
+        title="Loss % Trend by Month",
+        subtitle=subtitle,
+    )
+
+    loss_compare_img = make_generic_table_png_image(
+        format_loss_comparison_table(loss_compare_df),
+        title="Monthly Loss % Comparison",
+        subtitle="This table compares loss percentage month-by-month across available years.",
+        col_widths=[190, 130, 130, 130],
+        row_h=38,
+    )
+
+    table_images = []
+    for year in [2026, 2025, 2024]:
+        if year in summary_by_year:
+            table_images.append(
+                make_summary_table_png_image(
+                    format_summary_for_display(summary_by_year[year]),
+                    title=f"Summary Table ({year})",
+                    subtitle=subtitle,
+                )
+            )
+
+    margin = 36
+    gap = 24
+    header_h = 120
+    report_w = max([kpi_img.width, chart_img.width, loss_compare_img.width, *[img.width for img in table_images]]) + margin * 2
+    report_h = header_h + kpi_img.height + gap + chart_img.height + gap + loss_compare_img.height + gap
+    report_h += sum(img.height for img in table_images) + gap * len(table_images) + margin
+
+    report = Image.new("RGB", (report_w, report_h), "white")
+    draw = ImageDraw.Draw(report)
+
+    title_font = get_pil_font(32, bold=True)
+    body_font = get_pil_font(17)
+    small_font = get_pil_font(14)
+
+    draw.text((margin, 24), "EDC Cabin Loss Printable Report", font=title_font, fill="#0f172a")
+    draw.text((margin, 66), subtitle, font=body_font, fill="#334155")
+    draw.text(
+        (margin, 92),
+        "Use this report for one selected cabin. Batch PNG export is intentionally avoided to keep Streamlit Cloud stable.",
+        font=small_font,
+        fill="#64748b",
+    )
+
+    y = header_h
+    for img in [kpi_img, chart_img, loss_compare_img, *table_images]:
+        report.paste(img, (margin, y))
+        y += img.height + gap
+
+    return image_to_png_bytes(report)
+
+
+def build_selected_report_zip_bytes(
+    province: str,
+    cabin_name: str,
+    ranking_month: str,
+    report_png_bytes: bytes,
+    visible_ranking_df: pd.DataFrame,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_compare_df: pd.DataFrame,
+    yearly_kpi_df: pd.DataFrame,
+) -> bytes:
+    zip_buffer = io.BytesIO()
+    safe_cabin = safe_filename(cabin_name)
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_{ranking_month}_{LATEST_YEAR}_Printable_Report.png"),
+            report_png_bytes,
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_Visible_Ranking.csv"),
+            build_ranking_csv_bytes(visible_ranking_df),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Summary_2024_2025_2026.csv"),
+            build_all_year_summary_csv(summary_by_year),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Loss_Comparison.csv"),
+            loss_compare_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Yearly_KPI.csv"),
+            yearly_kpi_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+    return zip_buffer.getvalue()
+
+
 # =========================================================
 # UI
 # =========================================================
 st.title("⚡ EDC Cabin Loss Dashboard")
-st.caption("2024/2025 are loaded from the GitHub repository. Upload 2026 CSV files when running the app.")
+st.caption(
+    "2024/2025 are loaded from the GitHub repository. Upload 2026 CSV files only when running the app."
+)
 
 static_sources = build_static_sources()
 
 with st.sidebar:
-    st.header("Data input")
+    st.header("1) Data input")
     uploaded_2026_files = st.file_uploader(
         "Upload 2026 province CSV files",
         type=["csv"],
@@ -830,11 +1156,11 @@ year_sources: Dict[int, Dict[str, CsvSource]] = {
 with st.sidebar:
     st.subheader("Upload status")
     uploaded_count = len(uploaded_2026_sources)
-    st.write(f"2026 uploaded provinces: **{uploaded_count}/15**")
     missing_2026 = [p for p in PROVINCES if p not in uploaded_2026_sources]
     missing_2024 = [p for p in PROVINCES if p not in year_sources[2024]]
     missing_2025 = [p for p in PROVINCES if p not in year_sources[2025]]
 
+    st.write(f"2026 uploaded provinces: **{uploaded_count}/15**")
     if missing_2026:
         st.warning("Missing 2026: " + ", ".join(missing_2026))
     else:
@@ -853,10 +1179,14 @@ with st.sidebar:
         if missing_2025:
             st.write("Missing 2025: " + ", ".join(missing_2025))
 
-    st.header("Controls")
-    province = st.selectbox("Province", PROVINCES, index=0)
+    st.header("2) Analysis controls")
+    available_for_analysis = [p for p in PROVINCES if p in uploaded_2026_sources]
+    if not available_for_analysis:
+        available_for_analysis = PROVINCES
+
+    province = st.selectbox("Province", available_for_analysis, index=0)
     ranking_month = st.selectbox("Ranking month", MONTHS, index=0)
-    top_n_choice = st.selectbox("Ranking rows", [10, 20, 50, "All"], index=1)
+    top_n_choice = st.selectbox("Ranking rows shown", [10, 20, 50, "All"], index=1)
     cabin_type_filter = st.selectbox("Cabin type filter", ["All", "Single", "Multiple", "Unknown"], index=0)
 
 source_2026 = get_year_source(year_sources, 2026, province)
@@ -874,27 +1204,52 @@ cabin_meta_2026 = data_2026["cabin_meta"]
 meta_2026_indexed = data_2026["cabin_meta_indexed"]
 counts = data_2026["counts"].iloc[0].to_dict()
 
-st.subheader(f"Cabin Type Counts - {province} 2026")
+# ---------------------------------------------------------
+# Data quality and overview
+# ---------------------------------------------------------
+st.subheader(f"Cabin Type Counts — {province} 2026")
 metric_cols = st.columns(4)
 metric_cols[0].metric("All Cabins", int(counts["All"]))
 metric_cols[1].metric("Single", int(counts["Single"]))
 metric_cols[2].metric("Multiple", int(counts["Multiple"]))
 metric_cols[3].metric("Unknown", int(counts["Unknown"]))
 
+unknown_share = 0 if counts["All"] == 0 else counts["Unknown"] / counts["All"] * 100
+if unknown_share > 5:
+    st.warning(
+        f"Data quality warning: Unknown cabin type is {unknown_share:.1f}% of cabins. "
+        "Check blank or invalid Consumer values before using this report for billing decisions."
+    )
+
 st.divider()
 
-st.subheader(f"Single Cabin Ranking by Total - Sale - {ranking_month} {LATEST_YEAR}")
+# ---------------------------------------------------------
+# Ranking
+# ---------------------------------------------------------
+st.subheader(f"Single Cabin Ranking by Total - Sale — {ranking_month} {LATEST_YEAR}")
 full_ranking_df = build_single_cabin_gap_ranking(cabin_meta_2026, ranking_month)
-visible_ranking_df = full_ranking_df if top_n_choice == "All" else full_ranking_df.head(int(top_n_choice)).copy()
+
+if top_n_choice == "All":
+    visible_ranking_df = full_ranking_df.copy()
+else:
+    visible_ranking_df = full_ranking_df.head(int(top_n_choice)).copy()
 
 if visible_ranking_df.empty:
     st.warning("No Single cabin ranking data found for the selected province/month.")
 else:
     st.dataframe(make_ranking_display_df(visible_ranking_df), use_container_width=True, hide_index=True)
+    st.download_button(
+        "Download visible ranking CSV",
+        data=build_ranking_csv_bytes(visible_ranking_df),
+        file_name=safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_visible_ranking.csv"),
+        mime="text/csv",
+    )
 
 st.divider()
 
-# Cabin selector: default to highest ranked visible Single cabin when available.
+# ---------------------------------------------------------
+# Cabin selector
+# ---------------------------------------------------------
 if cabin_type_filter == "All":
     cabin_options_df = cabin_meta_2026.copy()
 else:
@@ -911,6 +1266,7 @@ option_labels = {
     row["__cabin_key"]: f"{row['display_name']} | {row['type']} | customers {format_number(row['customers'], 0)}"
     for _, row in cabin_options_df.iterrows()
 }
+
 selected_cabin_key = st.selectbox(
     "Open cabin summary",
     options=option_keys,
@@ -924,9 +1280,22 @@ if selected_row is None:
     st.stop()
 
 resolved_name = selected_row["display_name"]
-summary_2026 = build_summary_table_from_row(selected_row)
 
-st.subheader(f"Overview - {province} | Cabin {resolved_name}")
+summary_by_year, loss_by_year, meta_by_year, status_by_year = get_summary_and_loss_for_cabin(
+    year_sources=year_sources,
+    province=province,
+    selected_cabin_key=selected_cabin_key,
+    data_2026=data_2026,
+    selected_row_2026=selected_row,
+)
+
+yearly_kpi_df = build_yearly_kpi_table(summary_by_year)
+loss_compare_df = build_loss_comparison_table(summary_by_year, loss_by_year)
+
+# ---------------------------------------------------------
+# Selected cabin overview
+# ---------------------------------------------------------
+st.subheader(f"Selected Cabin Overview — {province} | Cabin {resolved_name}")
 cols = st.columns(5)
 cols[0].metric("Province", province)
 cols[1].metric("Cabin", resolved_name)
@@ -934,69 +1303,103 @@ cols[2].metric("Cabin Type", selected_row["type"])
 cols[3].metric("Matched Rows", int(selected_row["rows"]))
 cols[4].metric("Customers", int(selected_row["customers"]))
 
-summary_tabs = st.tabs(["Summary 2026", "Summary 2025", "Summary 2024", "Charts", "Raw rows 2026"])
+for year in [2025, 2024]:
+    if status_by_year.get(year) != "OK":
+        st.warning(f"{year}: {status_by_year.get(year)}")
 
-with summary_tabs[0]:
-    st.dataframe(format_summary_for_display(summary_2026), use_container_width=True, hide_index=True)
+st.markdown("### Yearly KPI Comparison")
+st.dataframe(format_yearly_kpi_table(yearly_kpi_df), use_container_width=True, hide_index=True)
 
-meta_by_year: Dict[int, pd.DataFrame] = {2026: meta_2026_indexed}
-loss_by_year: Dict[int, list[float]] = {2026: extract_monthly_losses_from_row(selected_row)}
+st.markdown("### Monthly Loss % Comparison — 2024 / 2025 / 2026")
+st.dataframe(format_loss_comparison_table(loss_compare_df), use_container_width=True, hide_index=True)
 
-for tab_idx, year in [(1, 2025), (2, 2024)]:
-    with summary_tabs[tab_idx]:
-        source = get_year_source(year_sources, year, province)
-        if source is None:
-            st.warning(f"No {year} CSV found in repository for province {province}.")
-            continue
-        try:
-            data_year = prepare_source(source)
-            meta_year = data_year["cabin_meta_indexed"]
-            meta_by_year[year] = meta_year
-            row_year = get_row_from_meta(meta_year, selected_cabin_key)
-            if row_year is None:
-                st.warning(f"Cabin {resolved_name} was not found in {year} data.")
-            else:
-                loss_by_year[year] = extract_monthly_losses_from_row(row_year)
-                st.dataframe(format_summary_for_display(build_summary_table_from_row(row_year)), use_container_width=True, hide_index=True)
-        except Exception as exc:
-            st.error(f"Could not read {year} file for {province}: {exc}")
+st.markdown("### Loss % Trend")
+st.plotly_chart(build_multi_year_loss_chart(loss_by_year), use_container_width=True)
 
-with summary_tabs[3]:
-    st.plotly_chart(build_sale_total_chart(summary_2026, 2026), use_container_width=True)
-    if loss_by_year:
-        st.plotly_chart(build_multi_year_loss_chart(loss_by_year), use_container_width=True)
+st.markdown("### Sale vs Total — 2026")
+st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_container_width=True)
+
+st.markdown("### Summary Tables — Same Place, No Separate Tabs")
+for year in [2026, 2025, 2024]:
+    st.markdown(f"#### Summary Table ({year})")
+    if year in summary_by_year:
+        st.dataframe(format_summary_for_display(summary_by_year[year]), use_container_width=True, hide_index=True)
     else:
-        st.warning("No loss data available for charting.")
+        st.info(status_by_year.get(year, f"No {year} data available."))
 
-with summary_tabs[4]:
+with st.expander("Matched raw rows — 2026"):
     raw_display = data_2026["df"][data_2026["df"]["__cabin_key"] == selected_cabin_key].copy()
     raw_display = raw_display.drop(columns=[c for c in raw_display.columns if c.startswith("__")], errors="ignore")
     st.dataframe(raw_display.reset_index(drop=True), use_container_width=True)
 
 st.divider()
-st.subheader("Export Combined PNGs for Visible Ranking")
-st.caption("Each PNG includes ranking context, the labeled Loss % chart, and 2026/2025/2024 summary tables.")
 
-# For export, load historical meta for this province once if available.
-export_meta_by_year = {2026: meta_2026_indexed}
-for year in [2025, 2024]:
-    source = get_year_source(year_sources, year, province)
-    if source is not None:
-        try:
-            export_meta_by_year[year] = prepare_source(source)["cabin_meta_indexed"]
-        except Exception:
-            export_meta_by_year[year] = pd.DataFrame()
+# ---------------------------------------------------------
+# Lightweight export
+# ---------------------------------------------------------
+st.subheader("Printable Export — Selected Cabin Only")
+st.caption(
+    "This export creates one readable report for the selected cabin, plus CSV support files. "
+    "It avoids generating one PNG per ranked cabin, which is what makes hosted Streamlit apps slow or stuck."
+)
 
-if visible_ranking_df.empty:
-    st.info("No visible ranking rows to export.")
-else:
-    if st.button("Build ZIP export", type="primary"):
-        with st.spinner("Building PNG ZIP export..."):
-            zip_bytes = build_export_zip_bytes(province, ranking_month, visible_ranking_df, export_meta_by_year)
-        st.success(f"ZIP ready: {len(visible_ranking_df)} PNG file(s).")
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}"
+
+if "report_cache_key" not in st.session_state:
+    st.session_state["report_cache_key"] = None
+if "report_png_bytes" not in st.session_state:
+    st.session_state["report_png_bytes"] = None
+if "report_zip_bytes" not in st.session_state:
+    st.session_state["report_zip_bytes"] = None
+
+if st.button("Build selected cabin printable report", type="primary"):
+    with st.spinner("Building one clean printable report..."):
+        report_png = make_printable_selected_report_png_bytes(
+            province=province,
+            cabin_name=resolved_name,
+            cabin_type=str(selected_row["type"]),
+            ranking_month=ranking_month,
+            summary_by_year=summary_by_year,
+            loss_by_year=loss_by_year,
+            yearly_kpi_df=yearly_kpi_df,
+            loss_compare_df=loss_compare_df,
+        )
+        report_zip = build_selected_report_zip_bytes(
+            province=province,
+            cabin_name=resolved_name,
+            ranking_month=ranking_month,
+            report_png_bytes=report_png,
+            visible_ranking_df=visible_ranking_df,
+            summary_by_year=summary_by_year,
+            loss_compare_df=loss_compare_df,
+            yearly_kpi_df=yearly_kpi_df,
+        )
+        st.session_state["report_cache_key"] = report_key
+        st.session_state["report_png_bytes"] = report_png
+        st.session_state["report_zip_bytes"] = report_zip
+
+if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_png_bytes"):
+    safe_cabin_name = safe_filename(resolved_name)
+    st.success("Report ready.")
+    col_png, col_zip = st.columns(2)
+    with col_png:
         st.download_button(
-            label="Download ZIP",
-            data=zip_bytes,
-            file_name=safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_Single_Cabin_Ranking_PNG.zip"),
+            "Download selected cabin report PNG",
+            data=st.session_state["report_png_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.png"),
+            mime="image/png",
+        )
+    with col_zip:
+        st.download_button(
+            "Download ZIP: report PNG + CSV files",
+            data=st.session_state["report_zip_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_report_package.zip"),
             mime="application/zip",
         )
+
+with st.expander("Why batch PNG export was removed"):
+    st.write(
+        "Generating one tall PNG for every ranked cabin is expensive in memory and CPU. "
+        "On Streamlit Cloud, the download data is kept in memory while the user is connected, "
+        "so a large ZIP can easily make the app slow or unstable. Use CSV for batch ranking and PNG for one selected cabin report."
+    )
