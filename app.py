@@ -1319,7 +1319,7 @@ st.plotly_chart(build_multi_year_loss_chart(loss_by_year), use_container_width=T
 st.markdown("### Sale vs Total — 2026")
 st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_container_width=True)
 
-st.markdown("### Summary Tables — Same Place, No Separate Tabs")
+st.markdown("### Summary Tables")
 for year in [2026, 2025, 2024]:
     st.markdown(f"#### Summary Table ({year})")
     if year in summary_by_year:
