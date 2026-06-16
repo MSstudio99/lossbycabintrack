@@ -1313,7 +1313,15 @@ default_cabin_text = str(default_row["display_name"]) if default_row is not None
 
 # Stable session key lets the buttons and spinner update the typed search box.
 cabin_search_key = f"cabin_search_{province}_{cabin_type_filter}"
-if cabin_search_key not in st.session_state:
+pending_cabin_search_key = f"pending_cabin_search_{province}_{cabin_type_filter}"
+
+# Streamlit rule: once a widget is created in a run, its session_state value
+# cannot be changed later in that same run. Navigation buttons therefore write
+# to a separate pending key, then rerun. On the next run, before the text_input
+# widget is created, we safely apply the pending cabin value.
+if pending_cabin_search_key in st.session_state:
+    st.session_state[cabin_search_key] = st.session_state.pop(pending_cabin_search_key)
+elif cabin_search_key not in st.session_state:
     st.session_state[cabin_search_key] = default_cabin_text
 
 st.markdown("### Open cabin summary")
@@ -1442,7 +1450,7 @@ with summary_control_col:
             target_key = browse_keys[target_pos]
             target_row = get_row_from_meta(meta_2026_indexed, target_key)
             if target_row is not None:
-                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
                 st.rerun()
 
         if st.button("Next ranked cabin ▶", key=f"summary_next_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
@@ -1450,7 +1458,7 @@ with summary_control_col:
             target_key = browse_keys[target_pos]
             target_row = get_row_from_meta(meta_2026_indexed, target_key)
             if target_row is not None:
-                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
                 st.rerun()
 
         ranking_position_choice = st.number_input(
@@ -1467,7 +1475,7 @@ with summary_control_col:
             target_key = browse_keys[int(ranking_position_choice) - 1]
             target_row = get_row_from_meta(meta_2026_indexed, target_key)
             if target_row is not None:
-                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
                 st.rerun()
 
         ranked_choice_key = st.selectbox(
@@ -1481,7 +1489,7 @@ with summary_control_col:
         if st.button("Open chosen ranked cabin", key=f"summary_open_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
             target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
             if target_row is not None:
-                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
                 st.rerun()
 
 with summary_table_col:
