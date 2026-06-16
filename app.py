@@ -761,9 +761,15 @@ def make_missing_year_image(year: int, province: str, cabin_name: str, rank_no: 
     )
 
 
-def image_to_png_bytes(img: Image.Image) -> bytes:
+def image_to_png_bytes(img: Image.Image, dpi: int = 300) -> bytes:
+    """Save PNG with DPI metadata.
+
+    Important: DPI metadata alone does not create sharp print output.
+    The image canvas must also be large enough. That is why the app now
+    exports high-resolution A4 PNG pages instead of one long low-resolution PNG.
+    """
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", optimize=True, dpi=(dpi, dpi))
     return buf.getvalue()
 
 
@@ -1175,6 +1181,480 @@ def build_selected_report_zip_bytes(
 
 
 # =========================================================
+# PRINT-READY PDF + HIGH-RESOLUTION PNG EXPORT HELPERS
+# =========================================================
+PRINT_DPI = 300
+A4_LANDSCAPE_PX = (3508, 2480)  # A4 at 300 DPI
+A4_PORTRAIT_PX = (2480, 3508)   # A4 at 300 DPI
+
+
+def make_loss_curve_png_image_sized(
+    loss_by_year: Dict[int, list[float]],
+    title: str,
+    subtitle: Optional[str] = None,
+    width: int = 3200,
+    height: int = 900,
+) -> Image.Image:
+    """High-resolution loss chart for print/PDF export."""
+    margin_l = 170
+    margin_r = 90
+    margin_t = 210
+    margin_b = 120
+
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    font_title = get_pil_font(52, bold=True)
+    font_subtitle = get_pil_font(30)
+    font_axis = get_pil_font(26)
+    font_legend = get_pil_font(28, bold=True)
+    font_label = get_pil_font(24, bold=True)
+
+    draw.text((40, 34), title, font=font_title, fill="#0f172a")
+    if subtitle:
+        draw.text((40, 104), subtitle[:180], font=font_subtitle, fill="#475569")
+
+    plot_x1, plot_y1 = margin_l, margin_t
+    plot_x2, plot_y2 = width - margin_r, height - margin_b
+
+    all_values = [v for values in loss_by_year.values() for v in values]
+    if not all_values:
+        all_values = [0.0]
+
+    y_min = min(0, math.floor(min(all_values) / 5) * 5)
+    y_max = max(5, math.ceil(max(all_values) / 5) * 5)
+    if y_max == y_min:
+        y_max = y_min + 5
+
+    y_padding = (y_max - y_min) * 0.16
+    y_min -= y_padding
+    y_max += y_padding
+
+    for i in range(6):
+        y_val = y_min + (y_max - y_min) * i / 5
+        y = plot_y2 - (y_val - y_min) / (y_max - y_min) * (plot_y2 - plot_y1)
+        draw.line([(plot_x1, y), (plot_x2, y)], fill="#e5e7eb", width=2)
+        draw.text((40, y - 16), f"{y_val:.1f}%", font=font_axis, fill="#64748b")
+
+    draw.line([(plot_x1, plot_y1), (plot_x1, plot_y2)], fill="#334155", width=4)
+    draw.line([(plot_x1, plot_y2), (plot_x2, plot_y2)], fill="#334155", width=4)
+
+    x_positions = []
+    for idx, month in enumerate(MONTHS):
+        x = plot_x1 + idx * (plot_x2 - plot_x1) / (len(MONTHS) - 1)
+        x_positions.append(x)
+        draw.line([(x, plot_y2), (x, plot_y2 + 10)], fill="#334155", width=2)
+        draw_centered_text(draw, (x - 55, plot_y2 + 22, x + 55, plot_y2 + 76), month, font_axis, "#334155")
+
+    year_styles = {
+        2024: {"color": "#f59e0b", "label_offset": -54},
+        2025: {"color": "#8b5cf6", "label_offset": 34},
+        2026: {"color": "#ef4444", "label_offset": -92},
+    }
+
+    legend_x, legend_y = width - 890, 42
+    for idx, year in enumerate(sorted(loss_by_year)):
+        color = year_styles.get(year, {"color": "#334155"})["color"]
+        ly = legend_y + idx * 50
+        draw.line([(legend_x, ly + 20), (legend_x + 82, ly + 20)], fill=color, width=8)
+        draw.ellipse([legend_x + 31, ly + 8, legend_x + 51, ly + 28], fill=color)
+        draw.text((legend_x + 110, ly), f"Loss % ({year})", font=font_legend, fill="#0f172a")
+
+    for year in sorted(loss_by_year):
+        style = year_styles.get(year, {"color": "#334155", "label_offset": -54})
+        color = style["color"]
+        label_offset = style["label_offset"]
+        values = loss_by_year[year]
+        points = []
+        for idx, val in enumerate(values):
+            x = x_positions[idx]
+            y = plot_y2 - (val - y_min) / (y_max - y_min) * (plot_y2 - plot_y1)
+            points.append((x, y))
+        curve = catmull_rom_spline(points, samples_per_segment=18)
+        if len(curve) > 1:
+            draw.line(curve, fill=color, width=8)
+        for idx, (x, y) in enumerate(points):
+            draw.ellipse([x - 10, y - 10, x + 10, y + 10], fill=color, outline="white", width=4)
+            label = f"{values[idx]:.2f}%"
+            bbox = draw.textbbox((0, 0), label, font=font_label)
+            label_w = bbox[2] - bbox[0]
+            label_y = max(plot_y1 - 78, min(y + label_offset, plot_y2 + 20))
+            label_x = max(plot_x1 - 45, min(x - label_w / 2, plot_x2 - label_w + 45))
+            draw_label_box(draw, label_x, label_y, label, font_label, color)
+
+    return img
+
+
+def draw_table_on_image(
+    draw: ImageDraw.ImageDraw,
+    display_df: pd.DataFrame,
+    x: int,
+    y: int,
+    width: int,
+    row_h: int,
+    header_font,
+    cell_font,
+    col_weights: Optional[list[float]] = None,
+    first_col_bold: bool = True,
+) -> int:
+    """Draw a dataframe table and return the y position after the table."""
+    headers = display_df.columns.astype(str).tolist()
+    rows = [headers] + display_df.astype(str).values.tolist()
+    n_cols = len(headers)
+
+    if col_weights is None or len(col_weights) != n_cols:
+        col_weights = [1.0] * n_cols
+    weight_sum = sum(col_weights)
+    col_widths = [int(width * w / weight_sum) for w in col_weights]
+    col_widths[-1] += width - sum(col_widths)
+
+    for r_idx, row in enumerate(rows):
+        cx = x
+        is_header = r_idx == 0
+        row_first_value = str(row[0]).lower() if len(row) else ""
+        is_total_row = row_first_value.startswith("weighted") or row_first_value.startswith("average")
+
+        if is_header:
+            bg, fg, font = "#0f172a", "white", header_font
+        elif is_total_row:
+            bg, fg, font = "#f8fafc", "#0f172a", get_pil_font(max(18, cell_font.size), bold=True) if hasattr(cell_font, "size") else cell_font
+        else:
+            bg, fg, font = "white", "#111827", cell_font
+
+        # Color summary rows by description when the second column is Description.
+        if not is_header and n_cols >= 2:
+            desc = str(row[1]).lower()
+            if desc in ["sale", "total", "total - sale", "losses"]:
+                bg, fg = summary_row_colors(desc)
+
+        for c_idx, cell in enumerate(row):
+            cw = col_widths[c_idx]
+            draw.rectangle([cx, y, cx + cw, y + row_h], fill=bg, outline="#cbd5e1", width=2)
+            text = str(cell)
+            max_chars = max(8, int(cw / 18))
+            if len(text) > max_chars:
+                text = text[: max_chars - 1] + "…"
+            use_font = font
+            if first_col_bold and not is_header and c_idx == 0:
+                use_font = get_pil_font(max(18, cell_font.size), bold=True) if hasattr(cell_font, "size") else font
+            draw_centered_text(draw, (cx + 8, y + 8, cx + cw - 8, y + row_h - 8), text, use_font, fg)
+            cx += cw
+        y += row_h
+    return y
+
+
+def make_high_res_table_page(
+    display_df: pd.DataFrame,
+    title: str,
+    subtitle: str,
+    col_weights: Optional[list[float]] = None,
+    row_h: int = 115,
+) -> Image.Image:
+    """Create one A4 landscape 300 DPI PNG page for a table."""
+    width, height = A4_LANDSCAPE_PX
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    margin_x = 120
+    y = 95
+    title_font = get_pil_font(64, bold=True)
+    subtitle_font = get_pil_font(32)
+    header_font = get_pil_font(30, bold=True)
+    cell_font = get_pil_font(28)
+
+    draw.text((margin_x, y), title, font=title_font, fill="#0f172a")
+    y += 84
+    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#475569")
+    y += 88
+
+    table_width = width - margin_x * 2
+    draw_table_on_image(draw, display_df, margin_x, y, table_width, row_h, header_font, cell_font, col_weights)
+    return img
+
+
+def make_high_res_overview_page(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    yearly_kpi_df: pd.DataFrame,
+    loss_by_year: Dict[int, list[float]],
+) -> Image.Image:
+    """Create A4 landscape page with KPI table and high-resolution chart."""
+    width, height = A4_LANDSCAPE_PX
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    margin_x = 120
+    y = 80
+    title_font = get_pil_font(68, bold=True)
+    subtitle_font = get_pil_font(34)
+    note_font = get_pil_font(28)
+    header_font = get_pil_font(30, bold=True)
+    cell_font = get_pil_font(30)
+
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+    draw.text((margin_x, y), "EDC Cabin Loss Printable Report", font=title_font, fill="#0f172a")
+    y += 92
+    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#334155")
+    y += 54
+    draw.text((margin_x, y), "Print-ready export: A4 landscape, 300 DPI PNG pages. Use the PDF for the sharpest printed report.", font=note_font, fill="#64748b")
+    y += 92
+
+    kpi_display = format_yearly_kpi_table(yearly_kpi_df)
+    draw.text((margin_x, y), "Yearly KPI Comparison", font=get_pil_font(42, bold=True), fill="#0f172a")
+    y += 62
+    draw_table_on_image(
+        draw,
+        kpi_display,
+        margin_x,
+        y,
+        width - margin_x * 2,
+        92,
+        header_font,
+        cell_font,
+        col_weights=[0.8, 1.5, 1.5, 1.5, 1.4, 1.6],
+    )
+    y += 92 * (len(kpi_display) + 1) + 60
+
+    chart_img = make_loss_curve_png_image_sized(
+        loss_by_year,
+        title="Loss % Trend by Month",
+        subtitle=subtitle,
+        width=width - margin_x * 2,
+        height=900,
+    )
+    img.paste(chart_img, (margin_x, y))
+    return img
+
+
+def build_high_res_png_pages_zip_bytes(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_by_year: Dict[int, list[float]],
+    yearly_kpi_df: pd.DataFrame,
+    loss_compare_df: pd.DataFrame,
+) -> bytes:
+    """Build a ZIP containing separate A4 300 DPI PNG pages.
+
+    This avoids the blurry one-long-PNG problem and keeps each page printable.
+    """
+    safe_cabin = safe_filename(cabin_name)
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+
+    pages: list[tuple[str, Image.Image]] = []
+    pages.append((
+        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Overview_A4_300DPI.png"),
+        make_high_res_overview_page(province, cabin_name, cabin_type, ranking_month, yearly_kpi_df, loss_by_year),
+    ))
+
+    pages.append((
+        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_300DPI.png"),
+        make_high_res_table_page(
+            format_loss_comparison_table(loss_compare_df),
+            title="Monthly Loss % Comparison",
+            subtitle=subtitle,
+            col_weights=[1.7, 1.0, 1.0, 1.0],
+            row_h=105,
+        ),
+    ))
+
+    page_no = 3
+    summary_weights = [0.9, 2.5, 1.0] + [1.45] * 12 + [2.0, 1.8]
+    for year in [2026, 2025, 2024]:
+        if year not in summary_by_year:
+            continue
+        pages.append((
+            safe_filename(f"{page_no:02d}_{province}_Cabin_{safe_cabin}_Summary_{year}_A4_300DPI.png"),
+            make_high_res_table_page(
+                format_summary_for_display(summary_by_year[year]),
+                title=f"Summary Table ({year})",
+                subtitle=subtitle,
+                col_weights=summary_weights,
+                row_h=125,
+            ),
+        ))
+        page_no += 1
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for filename, page_img in pages:
+            zipf.writestr(filename, image_to_png_bytes(page_img, dpi=PRINT_DPI))
+    return zip_buffer.getvalue()
+
+
+def _reportlab_table(display_df: pd.DataFrame, col_widths: Optional[list[float]] = None):
+    from reportlab.lib import colors
+    from reportlab.platypus import Table, TableStyle
+
+    data = [display_df.columns.astype(str).tolist()] + display_df.astype(str).values.tolist()
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    style = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 6.5),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+        ("FONTSIZE", (0, 1), (-1, -1), 6.2),
+        ("LEADING", (0, 0), (-1, -1), 7.2),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+    ])
+    table.setStyle(style)
+    return table
+
+
+def _pdf_footer(canvas, doc):
+    from reportlab.lib.colors import HexColor
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(HexColor("#64748b"))
+    canvas.drawString(doc.leftMargin, 18, "EDC Cabin Loss Dashboard — print-ready selected cabin report")
+    canvas.drawRightString(doc.pagesize[0] - doc.rightMargin, 18, f"Page {doc.page}")
+    canvas.restoreState()
+
+
+def make_printable_selected_report_pdf_bytes(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_by_year: Dict[int, list[float]],
+    yearly_kpi_df: pd.DataFrame,
+    loss_compare_df: pd.DataFrame,
+) -> bytes:
+    """Build a sharp PDF report. Text and tables are vector-based, not blurry raster text."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
+    except Exception as exc:
+        raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=24,
+        rightMargin=24,
+        topMargin=28,
+        bottomMargin=30,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#0f172a"),
+        spaceAfter=8,
+    )
+    h2_style = ParagraphStyle(
+        "ReportH2",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#0f172a"),
+        spaceBefore=4,
+        spaceAfter=6,
+    )
+    small_style = ParagraphStyle(
+        "Small",
+        parent=styles["BodyText"],
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#475569"),
+    )
+
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+    story = []
+    story.append(Paragraph("EDC Cabin Loss Printable Report", title_style))
+    story.append(Paragraph(subtitle, small_style))
+    story.append(Paragraph("PDF is the recommended print format because text and tables remain sharp when printed.", small_style))
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("Yearly KPI Comparison", h2_style))
+    story.append(_reportlab_table(
+        format_yearly_kpi_table(yearly_kpi_df),
+        col_widths=[0.55 * inch, 1.05 * inch, 1.05 * inch, 1.05 * inch, 1.05 * inch, 1.15 * inch],
+    ))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Loss % Trend by Month", h2_style))
+    chart_png = image_to_png_bytes(
+        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=2200, height=700),
+        dpi=PRINT_DPI,
+    )
+    story.append(RLImage(io.BytesIO(chart_png), width=7.55 * inch, height=2.4 * inch))
+
+    story.append(PageBreak())
+    story.append(Paragraph("Monthly Loss % Comparison", h2_style))
+    story.append(_reportlab_table(
+        format_loss_comparison_table(loss_compare_df),
+        col_widths=[1.65 * inch, 1.0 * inch, 1.0 * inch, 1.0 * inch],
+    ))
+
+    summary_col_widths = [0.27 * inch, 0.78 * inch, 0.35 * inch] + [0.39 * inch] * 12 + [0.65 * inch, 0.55 * inch]
+    for year in [2026, 2025, 2024]:
+        story.append(PageBreak())
+        story.append(Paragraph(f"Summary Table ({year})", h2_style))
+        if year in summary_by_year:
+            story.append(_reportlab_table(format_summary_for_display(summary_by_year[year]), col_widths=summary_col_widths))
+        else:
+            story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
+
+    doc.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
+    return buffer.getvalue()
+
+
+def build_selected_pdf_report_package_zip_bytes(
+    province: str,
+    cabin_name: str,
+    ranking_month: str,
+    report_pdf_bytes: bytes,
+    visible_ranking_df: pd.DataFrame,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_compare_df: pd.DataFrame,
+    yearly_kpi_df: pd.DataFrame,
+) -> bytes:
+    """ZIP package with the sharp PDF report and supporting CSV files."""
+    zip_buffer = io.BytesIO()
+    safe_cabin = safe_filename(cabin_name)
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_{ranking_month}_{LATEST_YEAR}_Printable_Report.pdf"),
+            report_pdf_bytes,
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_Visible_Ranking.csv"),
+            build_ranking_csv_bytes(visible_ranking_df),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Summary_2024_2025_2026.csv"),
+            build_all_year_summary_csv(summary_by_year),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Loss_Comparison.csv"),
+            loss_compare_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Yearly_KPI.csv"),
+            yearly_kpi_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+    return zip_buffer.getvalue()
+
+
+# =========================================================
 # UI
 # =========================================================
 st.title("⚡ EDC Cabin Loss Dashboard")
@@ -1508,26 +1988,28 @@ with st.expander("Matched raw rows — 2026"):
 st.divider()
 
 # ---------------------------------------------------------
-# Lightweight export
+# Print-ready export
 # ---------------------------------------------------------
-st.subheader("Printable Export — Selected Cabin Only")
+st.subheader("Print-Ready Export — Selected Cabin Only")
 st.caption(
-    "This export creates one readable report for the selected cabin, plus CSV support files. "
-    "It avoids generating one PNG per ranked cabin, which is what makes hosted Streamlit apps slow or stuck."
+    "For printing, PDF is the main export because text and tables stay sharp. "
+    "High-resolution PNG export is now split into A4 300 DPI pages instead of one blurry long image."
 )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v2"
 
 if "report_cache_key" not in st.session_state:
     st.session_state["report_cache_key"] = None
-if "report_png_bytes" not in st.session_state:
-    st.session_state["report_png_bytes"] = None
-if "report_zip_bytes" not in st.session_state:
-    st.session_state["report_zip_bytes"] = None
+if "report_pdf_bytes" not in st.session_state:
+    st.session_state["report_pdf_bytes"] = None
+if "report_png_pages_zip_bytes" not in st.session_state:
+    st.session_state["report_png_pages_zip_bytes"] = None
+if "report_package_zip_bytes" not in st.session_state:
+    st.session_state["report_package_zip_bytes"] = None
 
-if st.button("Build selected cabin printable report", type="primary"):
-    with st.spinner("Building one clean printable report..."):
-        report_png = make_printable_selected_report_png_bytes(
+if st.button("Build print-ready report", type="primary"):
+    with st.spinner("Building print-ready PDF and high-resolution PNG pages..."):
+        report_pdf = make_printable_selected_report_pdf_bytes(
             province=province,
             cabin_name=resolved_name,
             cabin_type=str(selected_row["type"]),
@@ -1537,42 +2019,65 @@ if st.button("Build selected cabin printable report", type="primary"):
             yearly_kpi_df=yearly_kpi_df,
             loss_compare_df=loss_compare_df,
         )
-        report_zip = build_selected_report_zip_bytes(
+        png_pages_zip = build_high_res_png_pages_zip_bytes(
+            province=province,
+            cabin_name=resolved_name,
+            cabin_type=str(selected_row["type"]),
+            ranking_month=ranking_month,
+            summary_by_year=summary_by_year,
+            loss_by_year=loss_by_year,
+            yearly_kpi_df=yearly_kpi_df,
+            loss_compare_df=loss_compare_df,
+        )
+        report_package_zip = build_selected_pdf_report_package_zip_bytes(
             province=province,
             cabin_name=resolved_name,
             ranking_month=ranking_month,
-            report_png_bytes=report_png,
+            report_pdf_bytes=report_pdf,
             visible_ranking_df=visible_ranking_df,
             summary_by_year=summary_by_year,
             loss_compare_df=loss_compare_df,
             yearly_kpi_df=yearly_kpi_df,
         )
-        st.session_state["report_cache_key"] = report_key
-        st.session_state["report_png_bytes"] = report_png
-        st.session_state["report_zip_bytes"] = report_zip
 
-if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_png_bytes"):
+        st.session_state["report_cache_key"] = report_key
+        st.session_state["report_pdf_bytes"] = report_pdf
+        st.session_state["report_png_pages_zip_bytes"] = png_pages_zip
+        st.session_state["report_package_zip_bytes"] = report_package_zip
+
+if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_pdf_bytes"):
     safe_cabin_name = safe_filename(resolved_name)
-    st.success("Report ready.")
-    col_png, col_zip = st.columns(2)
+    st.success("Print-ready report is ready.")
+
+    col_pdf, col_png, col_zip = st.columns(3)
+    with col_pdf:
+        st.download_button(
+            "Download PDF report",
+            data=st.session_state["report_pdf_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
+            mime="application/pdf",
+            use_container_width=True,
+        )
     with col_png:
         st.download_button(
-            "Download selected cabin report PNG",
-            data=st.session_state["report_png_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.png"),
-            mime="image/png",
+            "Download A4 PNG pages ZIP",
+            data=st.session_state["report_png_pages_zip_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
+            mime="application/zip",
+            use_container_width=True,
         )
     with col_zip:
         st.download_button(
-            "Download ZIP: report PNG + CSV files",
-            data=st.session_state["report_zip_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_report_package.zip"),
+            "Download PDF + CSV package",
+            data=st.session_state["report_package_zip_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_pdf_csv_package.zip"),
             mime="application/zip",
+            use_container_width=True,
         )
 
-with st.expander("Why batch PNG export was removed"):
+with st.expander("Why the old single PNG export was replaced"):
     st.write(
-        "Generating one tall PNG for every ranked cabin is expensive in memory and CPU. "
-        "On Streamlit Cloud, the download data is kept in memory while the user is connected, "
-        "so a large ZIP can easily make the app slow or unstable. Use CSV for batch ranking and PNG for one selected cabin report."
+        "A single long PNG is a raster image. When it is stretched or scaled for printing, text becomes blurry. "
+        "This version uses PDF as the main print export and, if PNG is needed, creates separate A4 landscape pages at 300 DPI. "
+        "This is sharper and more stable than generating one very tall image."
     )
