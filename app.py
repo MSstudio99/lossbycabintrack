@@ -1602,13 +1602,16 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build an A4 landscape PDF with one clear full-year summary page per year."""
+    """Build an A4 landscape PDF without the Loss % Trend chart page.
+
+The PDF now contains KPI, Monthly Loss % Comparison, and yearly summary tables only.
+"""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
@@ -1685,18 +1688,7 @@ def make_printable_selected_report_pdf_bytes(
         numeric_start_col=1,
     ))
 
-    # Page 2 - loss trend chart. Give it a full page so labels are readable.
-    story.append(PageBreak())
-    story.append(Paragraph("Loss % Trend by Month", h1_style))
-    story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 6))
-    chart_png = image_to_png_bytes(
-        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=3200, height=1250),
-        dpi=PRINT_DPI,
-    )
-    story.append(RLImage(io.BytesIO(chart_png), width=min(usable_w, 10.75 * inch), height=4.15 * inch))
-
-    # Page 3 - monthly comparison.
+    # Page 2 - monthly comparison.
     story.append(PageBreak())
     story.append(Paragraph("Monthly Loss % Comparison", h1_style))
     story.append(Paragraph(subtitle, small_style))
@@ -2180,7 +2172,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v3"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v6_no_loss_trend_pdf"
 
 for state_key in [
     "report_cache_key",
