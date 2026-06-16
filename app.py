@@ -1244,27 +1244,27 @@ def make_loss_curve_png_image_sized(
     title: str,
     subtitle: Optional[str] = None,
     width: int = 3300,
-    height: int = 1500,
+    height: int = 1480,
     show_point_labels: bool = True,
 ) -> Image.Image:
-    """Large print-ready scatter/line chart with readable point values."""
-    margin_l = 190
-    margin_r = 125
-    margin_t = 180
-    margin_b = 145
+    """Large print-ready scatter/line chart with readable values."""
+    margin_l = 195
+    margin_r = 135
+    margin_t = 185
+    margin_b = 150
 
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    font_title = get_pil_font(64, bold=True)
-    font_subtitle = get_pil_font(32)
-    font_axis = get_pil_font(38)
-    font_legend = get_pil_font(40, bold=True)
-    font_label = get_pil_font(39, bold=True)
+    font_title = get_pil_font(68, bold=True)
+    font_subtitle = get_pil_font(34)
+    font_axis = get_pil_font(40)
+    font_legend = get_pil_font(43, bold=True)
+    font_label = get_pil_font(46, bold=True)
 
-    draw.text((36, 28), title, font=font_title, fill="#111827")
+    draw.text((36, 26), title, font=font_title, fill="#111827")
     if subtitle:
-        draw.text((36, 108), subtitle[:180], font=font_subtitle, fill="#475569")
+        draw.text((36, 112), subtitle[:170], font=font_subtitle, fill="#475569")
 
     plot_x1, plot_y1 = margin_l, margin_t
     plot_x2, plot_y2 = width - margin_r, height - margin_b
@@ -1277,7 +1277,7 @@ def make_loss_curve_png_image_sized(
     y_max = max(5, math.ceil(max(all_values) / 2) * 2)
     if y_max == y_min:
         y_max = y_min + 5
-    y_pad = (y_max - y_min) * 0.24
+    y_pad = (y_max - y_min) * 0.28
     y_min -= y_pad
     y_max += y_pad
 
@@ -1287,7 +1287,7 @@ def make_loss_curve_png_image_sized(
         y_val = y_min + (y_max - y_min) * i / 5
         y = plot_y2 - (y_val - y_min) / (y_max - y_min) * (plot_y2 - plot_y1)
         draw.line([(plot_x1, y), (plot_x2, y)], fill="#dbe4ef", width=3)
-        draw.text((38, y - 22), f"{y_val:.1f}%", font=font_axis, fill="#334155")
+        draw.text((38, y - 24), f"{y_val:.1f}%", font=font_axis, fill="#334155")
 
     x_positions = []
     for idx, month in enumerate(MONTHS):
@@ -1295,31 +1295,28 @@ def make_loss_curve_png_image_sized(
         x_positions.append(x)
         draw.line([(x, plot_y1), (x, plot_y2)], fill="#eef2f7", width=3)
         draw.line([(x, plot_y2), (x, plot_y2 + 16)], fill="#111827", width=4)
-        draw_centered_text(draw, (x - 74, plot_y2 + 34, x + 74, plot_y2 + 98), month, font_axis, "#111827")
+        draw_centered_text(draw, (x - 78, plot_y2 + 36, x + 78, plot_y2 + 105), month, font_axis, "#111827")
 
     draw.line([(plot_x1, plot_y1), (plot_x1, plot_y2)], fill="#111827", width=6)
     draw.line([(plot_x1, plot_y2), (plot_x2, plot_y2)], fill="#111827", width=6)
 
-    draw.text((plot_x1 + (plot_x2 - plot_x1) / 2 - 98, height - 52), "Month", font=font_axis, fill="#111827")
-    draw.text((30, plot_y1 - 60), "Loss %", font=font_axis, fill="#111827")
-
     year_styles = {
-        2024: {"color": "#f59e0b", "label_offset": -78},
-        2025: {"color": "#7c3aed", "label_offset": 58},
-        2026: {"color": "#dc2626", "label_offset": -142},
+        2024: {"color": "#f59e0b", "label_offset": -92},
+        2025: {"color": "#7c3aed", "label_offset": 64},
+        2026: {"color": "#dc2626", "label_offset": -158},
     }
 
-    legend_x = width - 810
-    legend_y = 34
+    legend_x = width - 870
+    legend_y = 38
     for idx, year in enumerate(sorted(loss_by_year)):
         color = year_styles.get(year, {"color": "#334155"})["color"]
-        lx = legend_x + idx * 265
-        draw.line([(lx, legend_y + 28), (lx + 86, legend_y + 28)], fill=color, width=11)
-        draw.ellipse([lx + 33, legend_y + 13, lx + 61, legend_y + 41], fill=color, outline="white", width=4)
-        draw.text((lx + 106, legend_y + 4), str(year), font=font_legend, fill="#111827")
+        lx = legend_x + idx * 290
+        draw.line([(lx, legend_y + 30), (lx + 92, legend_y + 30)], fill=color, width=12)
+        draw.ellipse([lx + 36, legend_y + 13, lx + 66, legend_y + 43], fill=color, outline="white", width=4)
+        draw.text((lx + 112, legend_y + 4), str(year), font=font_legend, fill="#111827")
 
     for year in sorted(loss_by_year):
-        style = year_styles.get(year, {"color": "#334155", "label_offset": -78})
+        style = year_styles.get(year, {"color": "#334155", "label_offset": -92})
         color = style["color"]
         label_offset = style["label_offset"]
         values = [float(v) if v is not None else 0.0 for v in loss_by_year[year]]
@@ -1335,7 +1332,7 @@ def make_loss_curve_png_image_sized(
             draw.line(curve, fill=color, width=10)
 
         for idx, (x, y) in enumerate(points):
-            draw.ellipse([x - 17, y - 17, x + 17, y + 17], fill=color, outline="white", width=5)
+            draw.ellipse([x - 18, y - 18, x + 18, y + 18], fill=color, outline="white", width=5)
 
             if show_point_labels:
                 label = f"{values[idx]:.2f}%"
@@ -1345,29 +1342,15 @@ def make_loss_curve_png_image_sized(
                 label_y = max(plot_y1 + 10, min(y + label_offset, plot_y2 - label_h - 10))
                 label_x = max(plot_x1 + 10, min(x - label_w / 2, plot_x2 - label_w - 10))
 
-                pad_x, pad_y = 9, 7
+                pad_x, pad_y = 10, 8
                 draw.rounded_rectangle(
                     [label_x - pad_x, label_y - pad_y, label_x + label_w + pad_x, label_y + label_h + pad_y],
-                    radius=10,
+                    radius=11,
                     fill="white",
                     outline=color,
                     width=4,
                 )
                 draw.text((label_x, label_y), label, font=font_label, fill=color)
-
-        if points:
-            last_x, last_y = points[-1]
-            label = f"{year}"
-            bbox = draw.textbbox((0, 0), label, font=font_legend)
-            label_w = bbox[2] - bbox[0]
-            draw.rounded_rectangle(
-                [last_x + 22, last_y - 32, last_x + 44 + label_w, last_y + 28],
-                radius=10,
-                fill="white",
-                outline=color,
-                width=4,
-            )
-            draw.text((last_x + 34, last_y - 24), label, font=font_legend, fill=color)
 
     return img
 
@@ -1382,15 +1365,9 @@ def draw_table_on_image(
     cell_font,
     col_weights: Optional[list[float]] = None,
     first_col_bold: bool = True,
-    min_font_size: int = 18,
+    min_font_size: int = 24,
 ) -> int:
-    """Draw a dataframe table and return the y position after the table.
-
-    Improved for printed reports:
-    - use larger fonts
-    - fit text by measuring real pixel width
-    - avoid unnecessary truncation of numeric values
-    """
+    """Draw a dataframe table and return the y position after the table."""
     headers = display_df.columns.astype(str).tolist()
     rows = [headers] + display_df.astype(str).values.tolist()
     n_cols = len(headers)
@@ -1401,6 +1378,44 @@ def draw_table_on_image(
     col_widths = [int(width * w / weight_sum) for w in col_weights]
     col_widths[-1] += width - sum(col_widths)
 
+    def _draw_fit(box, cell_text, font, fill, min_size):
+        x1, y1, x2, y2 = box
+        text_val = str(cell_text)
+        max_w = max(1, x2 - x1)
+        max_h = max(1, y2 - y1)
+        try:
+            size = int(getattr(font, "size", 34))
+        except Exception:
+            size = 34
+        try:
+            bold = "bold" in " ".join(font.getname()).lower()
+        except Exception:
+            bold = False
+
+        use_font = font
+        while size >= min_size:
+            bbox = draw.textbbox((0, 0), text_val, font=use_font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            if tw <= max_w and th <= max_h:
+                draw.text((x1 + (max_w - tw) / 2, y1 + (max_h - th) / 2), text_val, font=use_font, fill=fill)
+                return
+            size -= 1
+            use_font = get_pil_font(size, bold=bold)
+
+        # fallback: readable minimum with ellipsis only if absolutely necessary
+        use_font = get_pil_font(min_size, bold=bold)
+        clipped = text_val
+        while len(clipped) > 1:
+            bbox = draw.textbbox((0, 0), clipped, font=use_font)
+            if bbox[2] - bbox[0] <= max_w:
+                break
+            clipped = clipped[:-2] + "…"
+        bbox = draw.textbbox((0, 0), clipped, font=use_font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        draw.text((x1 + (max_w - tw) / 2, y1 + (max_h - th) / 2), clipped, font=use_font, fill=fill)
+
     for r_idx, row in enumerate(rows):
         cx = x
         is_header = r_idx == 0
@@ -1410,11 +1425,10 @@ def draw_table_on_image(
         if is_header:
             bg, fg, font = "#0f172a", "white", header_font
         elif is_total_row:
-            bg, fg, font = "#f8fafc", "#0f172a", get_pil_font(max(22, cell_font.size), bold=True) if hasattr(cell_font, "size") else cell_font
+            bg, fg, font = "#f8fafc", "#0f172a", get_pil_font(max(32, cell_font.size), bold=True) if hasattr(cell_font, "size") else cell_font
         else:
             bg, fg, font = "white", "#111827", cell_font
 
-        # Color summary rows by metric/description.
         if not is_header:
             desc_candidates = []
             if n_cols >= 1:
@@ -1431,18 +1445,17 @@ def draw_table_on_image(
 
         for c_idx, cell in enumerate(row):
             cw = col_widths[c_idx]
-            draw.rectangle([cx, y, cx + cw, y + row_h], fill=bg, outline="#cbd5e1", width=2)
+            draw.rectangle([cx, y, cx + cw, y + row_h], fill=bg, outline="#94a3b8", width=2)
             use_font = font
             if first_col_bold and not is_header and c_idx == 0:
-                use_font = get_pil_font(max(22, cell_font.size), bold=True) if hasattr(cell_font, "size") else font
+                use_font = get_pil_font(max(32, cell_font.size), bold=True) if hasattr(cell_font, "size") else font
 
-            draw_fitted_centered_text(
-                draw,
-                (cx + 7, y + 7, cx + cw - 7, y + row_h - 7),
-                str(cell),
+            _draw_fit(
+                (cx + 5, y + 5, cx + cw - 5, y + row_h - 5),
+                cell,
                 use_font,
                 fg,
-                min_size=min_font_size,
+                min_font_size,
             )
             cx += cw
         y += row_h
@@ -1490,43 +1503,43 @@ def make_high_res_overview_page(
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    margin_x = 82
-    y = 44
-    title_font = get_pil_font(62, bold=True)
-    subtitle_font = get_pil_font(32)
-    section_font = get_pil_font(38, bold=True)
-    header_font = get_pil_font(34, bold=True)
-    cell_font = get_pil_font(33)
+    margin_x = 72
+    y = 32
+    title_font = get_pil_font(66, bold=True)
+    subtitle_font = get_pil_font(34)
+    section_font = get_pil_font(44, bold=True)
+    header_font = get_pil_font(42, bold=True)
+    cell_font = get_pil_font(42)
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     draw.text((margin_x, y), "EDC Cabin Loss Printable Report", font=title_font, fill="#0f172a")
-    y += 76
-    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#334155")
-    y += 58
+    y += 80
+    draw.text((margin_x, y), subtitle[:160], font=subtitle_font, fill="#334155")
+    y += 56
 
     draw.text((margin_x, y), "Yearly KPI Comparison", font=section_font, fill="#0f172a")
-    y += 50
-    kpi_display = format_yearly_kpi_table(yearly_kpi_df)
+    y += 54
+    kpi_display = format_kpi_for_report(yearly_kpi_df)
     draw_table_on_image(
         draw,
         kpi_display,
         margin_x,
         y,
         width - margin_x * 2,
-        92,
+        108,
         header_font,
         cell_font,
-        col_weights=[0.75, 1.42, 1.42, 1.42, 1.35, 1.55],
-        min_font_size=24,
+        col_weights=[0.72, 1.25, 1.25, 1.15, 1.25, 1.40],
+        min_font_size=30,
     )
-    y += 92 * (len(kpi_display) + 1) + 38
+    y += 108 * (len(kpi_display) + 1) + 34
 
     chart_w = width - margin_x * 2
-    chart_h = height - y - 54
+    chart_h = height - y - 42
     chart_img = make_loss_curve_png_image_sized(
         loss_by_year,
         title="Loss % Trend by Month",
-        subtitle="Scatter points show monthly loss values for each year.",
+        subtitle="Monthly loss values by year.",
         width=chart_w,
         height=chart_h,
         show_point_labels=True,
@@ -1545,47 +1558,48 @@ def make_high_res_all_summary_page(
 ) -> Image.Image:
     """Create Page 2: Monthly Loss % Comparison + 2026/2025/2024 summary tables.
 
-    Fonts are intentionally larger for A4 print readability.
+    To make the font readable on one A4 landscape page, kWh values are shown
+    as MWh in the report. Exact kWh remains in the CSV export.
     """
     width, height = A4_LANDSCAPE_PX
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    margin_x = 54
-    y = 34
-    title_font = get_pil_font(48, bold=True)
-    subtitle_font = get_pil_font(27)
-    section_font = get_pil_font(31, bold=True)
+    margin_x = 42
+    y = 28
+    title_font = get_pil_font(50, bold=True)
+    subtitle_font = get_pil_font(30)
+    section_font = get_pil_font(36, bold=True)
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     draw.text((margin_x, y), "Summary Page — Monthly Loss + Yearly Summary Tables", font=title_font, fill="#0f172a")
     y += 58
-    draw.text((margin_x, y), subtitle[:180], font=subtitle_font, fill="#334155")
+    draw.text((margin_x, y), subtitle[:175], font=subtitle_font, fill="#334155")
     y += 42
 
     table_width = width - margin_x * 2
 
     if loss_compare_df is not None and not loss_compare_df.empty:
         draw.text((margin_x, y), "Monthly Loss % Comparison", font=section_font, fill="#0f172a")
-        y += 38
+        y += 40
         y = draw_table_on_image(
             draw,
-            format_loss_comparison_table(loss_compare_df),
+            format_loss_comparison_wide_for_report(loss_compare_df),
             margin_x,
             y,
             table_width,
-            56,
-            get_pil_font(27, bold=True),
-            get_pil_font(26),
-            col_weights=[1.7, 1.0, 1.0, 1.0],
-            min_font_size=21,
+            74,
+            get_pil_font(34, bold=True),
+            get_pil_font(34),
+            col_weights=[0.80] + [0.92] * 12 + [1.22, 0.95],
+            min_font_size=27,
         )
-        y += 22
+        y += 18
 
-    summary_weights = [1.24, 0.48] + [0.86] * 12 + [1.20, 1.00]
+    summary_weights = [1.12, 0.55] + [0.82] * 12 + [1.05, 0.92]
     for year in [2026, 2025, 2024]:
         draw.text((margin_x, y), f"Summary Table ({year})", font=section_font, fill="#0f172a")
-        y += 36
+        y += 38
         if year in summary_by_year:
             y = draw_table_on_image(
                 draw,
@@ -1593,20 +1607,20 @@ def make_high_res_all_summary_page(
                 margin_x,
                 y,
                 table_width,
-                64,
-                get_pil_font(27, bold=True),
-                get_pil_font(26),
+                78,
+                get_pil_font(34, bold=True),
+                get_pil_font(34),
                 col_weights=summary_weights,
-                min_font_size=20,
+                min_font_size=27,
             )
-            y += 18
+            y += 16
         else:
-            draw.text((margin_x, y), f"No {year} data available for this cabin.", font=get_pil_font(26), fill="#64748b")
-            y += 72
+            draw.text((margin_x, y), f"No {year} data available for this cabin.", font=get_pil_font(32), fill="#64748b")
+            y += 76
 
     draw.text(
         (margin_x, height - 34),
-        "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
+        "Note: Report table values are in MWh for readability. Exact kWh values remain in CSV downloads. Loss % = (1 - Sale / Total) × 100.",
         font=get_pil_font(22),
         fill="#64748b",
     )
@@ -1725,21 +1739,106 @@ def _reportlab_table(
     return table
 
 
-def _summary_display_full_for_report(summary_df: pd.DataFrame) -> pd.DataFrame:
-    """Compact full-year summary table for one A4 landscape page.
+def format_mwh_for_report(kwh_value) -> str:
+    """Format kWh as MWh for readable A4 report tables.
 
-    Removes the No column and shortens labels so all months remain readable
-    on a single landscape page.
+    The app keeps exact kWh in the CSV exports and on-screen tables. The PDF
+    report uses MWh only to make the printed values large enough to read.
     """
-    display = format_summary_for_display(summary_df).copy()
-    display = display.drop(columns=["No"], errors="ignore")
-    display = display.rename(columns={"Description": "Metric", "Accumulate": "Acc", "Average": "Avg"})
-    display["Metric"] = display["Metric"].replace({
-        "total - sale": "Gap",
-        "losses": "Loss %",
-    })
-    return display[["Metric", "Unit", *MONTHS, "Acc", "Avg"]]
+    try:
+        value = float(kwh_value) / 1000.0
+        if abs(value) < 0.005:
+            return "0"
+        if abs(value) < 10:
+            return f"{value:,.2f}"
+        if abs(value) < 100:
+            return f"{value:,.1f}"
+        return f"{value:,.0f}"
+    except Exception:
+        return "-"
 
+
+def format_kpi_for_report(kpi_df: pd.DataFrame) -> pd.DataFrame:
+    """KPI display table for the A4 report using MWh to keep text large."""
+    if kpi_df.empty:
+        return kpi_df
+    out = kpi_df.copy().astype(object)
+    out = out.rename(columns={
+        "Total kWh": "Total MWh",
+        "Sale kWh": "Sale MWh",
+        "Total - Sale": "Gap MWh",
+        "Weighted Loss %": "Weighted Loss",
+        "Avg Monthly Loss %": "Avg Monthly Loss",
+    })
+    for col in ["Total MWh", "Sale MWh", "Gap MWh"]:
+        if col in out.columns:
+            out[col] = out[col].map(format_mwh_for_report)
+    for col in ["Weighted Loss", "Avg Monthly Loss"]:
+        if col in out.columns:
+            out[col] = out[col].map(format_percent)
+    return out.astype(str)
+
+
+def format_loss_comparison_wide_for_report(loss_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert monthly loss comparison into a wide table for bigger print font."""
+    if loss_df.empty:
+        return loss_df
+
+    rows = []
+    for year in ALL_YEARS:
+        row = {"Year": str(year)}
+        for month in MONTHS:
+            try:
+                value = loss_df.loc[loss_df["Month"] == month, str(year)].iloc[0]
+                row[month] = "-" if pd.isna(value) else format_percent(value)
+            except Exception:
+                row[month] = "-"
+
+        try:
+            weighted = loss_df.loc[loss_df["Month"] == "Weighted yearly loss", str(year)].iloc[0]
+            row["Weighted"] = "-" if pd.isna(weighted) else format_percent(weighted)
+        except Exception:
+            row["Weighted"] = "-"
+
+        try:
+            avg = loss_df.loc[loss_df["Month"] == "Average monthly loss", str(year)].iloc[0]
+            row["Avg"] = "-" if pd.isna(avg) else format_percent(avg)
+        except Exception:
+            row["Avg"] = "-"
+
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=["Year", *MONTHS, "Weighted", "Avg"]).astype(str)
+
+
+def _summary_display_full_for_report(summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Readable full-year summary table for the A4 landscape report.
+
+    To keep the font large enough on one page, kWh rows are converted to MWh.
+    Exact kWh remains available in the CSV download.
+    """
+    rows = []
+    for _, src_row in summary_df.iterrows():
+        desc = str(src_row.get("Description", "")).strip()
+        if desc == "Sale":
+            metric, unit = "Sale", "MWh"
+            values = [format_mwh_for_report(src_row.get(col, 0)) for col in [*MONTHS, "Accumulate", "Average"]]
+        elif desc == "Total":
+            metric, unit = "Total", "MWh"
+            values = [format_mwh_for_report(src_row.get(col, 0)) for col in [*MONTHS, "Accumulate", "Average"]]
+        elif desc == "total - sale":
+            metric, unit = "Gap", "MWh"
+            values = [format_mwh_for_report(src_row.get(col, 0)) for col in [*MONTHS, "Accumulate", "Average"]]
+        elif desc == "losses":
+            metric, unit = "Loss %", "%"
+            values = [format_percent(src_row.get(col, 0)) for col in [*MONTHS, "Accumulate", "Average"]]
+        else:
+            metric, unit = desc, str(src_row.get("Unit", ""))
+            values = [str(src_row.get(col, "-")) for col in [*MONTHS, "Accumulate", "Average"]]
+
+        rows.append([metric, unit, *values])
+
+    return pd.DataFrame(rows, columns=["Metric", "Unit", *MONTHS, "Acc", "Avg"]).astype(str)
 
 def _summary_display_halves_for_pdf(summary_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Backward-compatible helper; the report now uses full landscape pages."""
