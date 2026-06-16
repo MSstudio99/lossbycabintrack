@@ -1236,9 +1236,10 @@ def build_selected_report_zip_bytes(
 # =========================================================
 PRINT_DPI = 300
 
-# Readable report font size
-REPORT_MIN_PT = 22
-REPORT_MIN_PX = int(round(REPORT_MIN_PT / 72 * PRINT_DPI))  # 22 pt at 300 DPI ≈ 92 px
+# Readable report font size for exported A4 report values
+# 28 pt is much more readable than 16–22 pt, but very dense tables may clip if forced into only two pages.
+REPORT_MIN_PT = 28
+REPORT_MIN_PX = int(round(REPORT_MIN_PT / 72 * PRINT_DPI))  # 28 pt at 300 DPI ≈ 117 px
 
 A4_LANDSCAPE_PX = (3508, 2480)  # A4 at 300 DPI
 A4_PORTRAIT_PX = (2480, 3508)   # A4 at 300 DPI
@@ -1265,7 +1266,7 @@ def make_loss_curve_png_image_sized(
     font_subtitle = get_pil_font(34)
     font_axis = get_pil_font(42)
     font_legend = get_pil_font(44, bold=True)
-    font_label = get_pil_font(max(72, REPORT_MIN_PX), bold=True)
+    font_label = get_pil_font(max(120, REPORT_MIN_PX), bold=True)
 
     draw.text((36, 26), title, font=font_title, fill='#111827')
     if subtitle:
@@ -1517,7 +1518,7 @@ def make_high_res_overview_page(
     subtitle_font = get_pil_font(36)
     section_font = get_pil_font(46, bold=True)
     header_font = get_pil_font(44, bold=True)
-    cell_font = get_pil_font(max(72, REPORT_MIN_PX))
+    cell_font = get_pil_font(max(120, REPORT_MIN_PX))
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     draw.text((margin_x, y), 'EDC Cabin Loss Printable Report', font=title_font, fill='#0f172a')
@@ -1598,7 +1599,7 @@ def make_high_res_all_summary_page(
             table_width,
             88,
             get_pil_font(38, bold=True),
-            get_pil_font(max(70, REPORT_MIN_PX)),
+            get_pil_font(max(120, REPORT_MIN_PX)),
             col_weights=[0.80] + [0.92] * 12 + [1.22, 0.95],
             min_value_font_size=REPORT_MIN_PX,
             min_header_font_size=28,
@@ -1618,7 +1619,7 @@ def make_high_res_all_summary_page(
                 table_width,
                 82,
                 get_pil_font(34, bold=True),
-                get_pil_font(max(70, REPORT_MIN_PX)),
+                get_pil_font(max(120, REPORT_MIN_PX)),
                 col_weights=summary_weights,
                 min_value_font_size=REPORT_MIN_PX,
                 min_header_font_size=24,
