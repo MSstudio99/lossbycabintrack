@@ -1193,39 +1193,44 @@ def make_loss_curve_png_image_sized(
     title: str,
     subtitle: Optional[str] = None,
     width: int = 3300,
-    height: int = 1380,
-    show_point_labels: bool = True,
+    height: int = 1050,
+    show_point_labels: bool = False,
 ) -> Image.Image:
-    """Large print-ready scatter/line chart with visible value labels.
+    """Clean high-resolution loss trend chart for A4 landscape report.
 
-    This version is designed for Page 1 of the A4 landscape report:
-    - chart uses most of the page
-    - scatter markers are large
-    - every monthly point has a visible value label
-    - line labels are offset by year to reduce overlap
+    The chart is intentionally large and simple:
+    - clean white background
+    - strong gridlines
+    - thick trend lines
+    - large markers
+    - readable axis labels
+    - legend clearly separated from the plot area
+
+    Exact values should be read from the Monthly Loss % table under the chart,
+    so point labels are off by default to avoid clutter.
     """
-    margin_l = 175
-    margin_r = 115
-    margin_t = 165
-    margin_b = 125
+    margin_l = 165
+    margin_r = 90
+    margin_t = 130
+    margin_b = 115
 
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    font_title = get_pil_font(54, bold=True)
+    font_title = get_pil_font(50, bold=True)
     font_subtitle = get_pil_font(25)
     font_axis = get_pil_font(30)
     font_legend = get_pil_font(32, bold=True)
-    font_label = get_pil_font(27, bold=True)
+    font_label = get_pil_font(28, bold=True)
 
-    draw.text((36, 26), title, font=font_title, fill="#111827")
+    draw.text((36, 22), title, font=font_title, fill="#111827")
     if subtitle:
-        draw.text((36, 94), subtitle[:190], font=font_subtitle, fill="#475569")
+        draw.text((36, 86), subtitle[:190], font=font_subtitle, fill="#475569")
 
     plot_x1, plot_y1 = margin_l, margin_t
     plot_x2, plot_y2 = width - margin_r, height - margin_b
 
-    all_values = [float(v) for values in loss_by_year.values() for v in values if v is not None]
+    all_values = [v for values in loss_by_year.values() for v in values if v is not None]
     if not all_values:
         all_values = [0.0]
 
@@ -1233,58 +1238,55 @@ def make_loss_curve_png_image_sized(
     y_max = max(5, math.ceil(max(all_values) / 2) * 2)
     if y_max == y_min:
         y_max = y_min + 5
-    y_pad = (y_max - y_min) * 0.20
+    y_pad = (y_max - y_min) * 0.16
     y_min -= y_pad
     y_max += y_pad
 
-    # White plot background with subtle frame.
-    draw.rectangle([plot_x1, plot_y1, plot_x2, plot_y2], fill="#ffffff", outline="#cbd5e1", width=3)
-
-    # Horizontal gridlines and Y labels.
+    # Horizontal grid and y labels.
     for i in range(6):
         y_val = y_min + (y_max - y_min) * i / 5
         y = plot_y2 - (y_val - y_min) / (y_max - y_min) * (plot_y2 - plot_y1)
-        draw.line([(plot_x1, y), (plot_x2, y)], fill="#dbe4ef", width=2)
-        draw.text((44, y - 18), f"{y_val:.1f}%", font=font_axis, fill="#334155")
+        draw.line([(plot_x1, y), (plot_x2, y)], fill="#d1d5db", width=2)
+        draw.text((38, y - 17), f"{y_val:.1f}%", font=font_axis, fill="#374151")
 
-    # X positions, vertical grid and month labels.
+    # Monthly vertical grid and x labels.
     x_positions = []
     for idx, month in enumerate(MONTHS):
         x = plot_x1 + idx * (plot_x2 - plot_x1) / (len(MONTHS) - 1)
         x_positions.append(x)
         draw.line([(x, plot_y1), (x, plot_y2)], fill="#eef2f7", width=2)
-        draw.line([(x, plot_y2), (x, plot_y2 + 12)], fill="#111827", width=3)
-        draw_centered_text(draw, (x - 62, plot_y2 + 28, x + 62, plot_y2 + 82), month, font_axis, "#111827")
+        draw.line([(x, plot_y2), (x, plot_y2 + 12)], fill="#111827", width=2)
+        draw_centered_text(draw, (x - 60, plot_y2 + 26, x + 60, plot_y2 + 78), month, font_axis, "#111827")
 
-    # Axis lines and labels.
+    # Axis lines.
     draw.line([(plot_x1, plot_y1), (plot_x1, plot_y2)], fill="#111827", width=5)
     draw.line([(plot_x1, plot_y2), (plot_x2, plot_y2)], fill="#111827", width=5)
-    draw.text((plot_x1 + (plot_x2 - plot_x1) / 2 - 82, height - 44), "Month", font=font_axis, fill="#111827")
-    draw.text((30, plot_y1 - 52), "Loss %", font=font_axis, fill="#111827")
+
+    # Axis titles.
+    draw.text((plot_x1 + (plot_x2 - plot_x1) / 2 - 82, height - 42), "Month", font=font_axis, fill="#111827")
+    draw.text((28, plot_y1 - 46), "Loss %", font=font_axis, fill="#111827")
 
     year_styles = {
-        2024: {"color": "#f59e0b", "label_offset": -62},
-        2025: {"color": "#7c3aed", "label_offset": 46},
-        2026: {"color": "#dc2626", "label_offset": -118},
+        2024: {"color": "#f59e0b", "label_offset": -50},
+        2025: {"color": "#7c3aed", "label_offset": 34},
+        2026: {"color": "#dc2626", "label_offset": -86},
     }
 
-    # Compact legend in the top-right.
-    legend_x = width - 720
+    # Legend outside the main plot area at the top-right.
+    legend_x = width - 710
     legend_y = 28
     for idx, year in enumerate(sorted(loss_by_year)):
         color = year_styles.get(year, {"color": "#334155"})["color"]
         lx = legend_x + idx * 235
-        draw.line([(lx, legend_y + 22), (lx + 76, legend_y + 22)], fill=color, width=9)
-        draw.ellipse([lx + 30, legend_y + 10, lx + 52, legend_y + 32], fill=color, outline="white", width=3)
-        draw.text((lx + 94, legend_y + 3), str(year), font=font_legend, fill="#111827")
+        draw.line([(lx, legend_y + 20), (lx + 70, legend_y + 20)], fill=color, width=8)
+        draw.ellipse([lx + 28, legend_y + 9, lx + 48, legend_y + 29], fill=color, outline="white", width=3)
+        draw.text((lx + 88, legend_y + 2), str(year), font=font_legend, fill="#111827")
 
-    # Plot each year.
+    # Trend lines and markers.
     for year in sorted(loss_by_year):
-        style = year_styles.get(year, {"color": "#334155", "label_offset": -62})
+        style = year_styles.get(year, {"color": "#334155", "label_offset": -50})
         color = style["color"]
-        label_offset = style["label_offset"]
-        values = [float(v) if v is not None else 0.0 for v in loss_by_year[year]]
-
+        values = loss_by_year[year]
         points = []
         for idx, val in enumerate(values):
             x = x_positions[idx]
@@ -1296,42 +1298,29 @@ def make_loss_curve_png_image_sized(
             draw.line(curve, fill=color, width=8)
 
         for idx, (x, y) in enumerate(points):
-            # Large scatter marker.
-            draw.ellipse([x - 13, y - 13, x + 13, y + 13], fill=color, outline="white", width=4)
-
+            draw.ellipse([x - 12, y - 12, x + 12, y + 12], fill=color, outline="white", width=4)
             if show_point_labels:
                 label = f"{values[idx]:.2f}%"
                 bbox = draw.textbbox((0, 0), label, font=font_label)
                 label_w = bbox[2] - bbox[0]
-                label_h = bbox[3] - bbox[1]
-                label_y = max(plot_y1 + 8, min(y + label_offset, plot_y2 - label_h - 8))
-                label_x = max(plot_x1 + 6, min(x - label_w / 2, plot_x2 - label_w - 6))
+                label_y = max(plot_y1 - 65, min(y + style["label_offset"], plot_y2 + 18))
+                label_x = max(plot_x1 - 40, min(x - label_w / 2, plot_x2 - label_w + 40))
+                draw_label_box(draw, label_x, label_y, label, font_label, color)
 
-                # Label box with color outline. Values remain readable after print.
-                pad_x, pad_y = 7, 5
-                draw.rounded_rectangle(
-                    [label_x - pad_x, label_y - pad_y, label_x + label_w + pad_x, label_y + label_h + pad_y],
-                    radius=8,
-                    fill="white",
-                    outline=color,
-                    width=3,
-                )
-                draw.text((label_x, label_y), label, font=font_label, fill=color)
-
-        # End-of-line year label.
+        # Label the final point of each line so the reader can connect line to year easily.
         if points:
             last_x, last_y = points[-1]
             label = f"{year}"
             bbox = draw.textbbox((0, 0), label, font=font_legend)
             label_w = bbox[2] - bbox[0]
             draw.rounded_rectangle(
-                [last_x + 18, last_y - 25, last_x + 34 + label_w, last_y + 22],
+                [last_x + 18, last_y - 24, last_x + 30 + label_w, last_y + 20],
                 radius=8,
                 fill="white",
                 outline=color,
                 width=3,
             )
-            draw.text((last_x + 26, last_y - 19), label, font=font_legend, fill=color)
+            draw.text((last_x + 24, last_y - 18), label, font=font_legend, fill=color)
 
     return img
 
@@ -1439,14 +1428,19 @@ def make_high_res_overview_page(
     loss_by_year: Dict[int, list[float]],
     loss_compare_df: pd.DataFrame,
 ) -> Image.Image:
-    """Create Page 1: KPI table + large labeled Loss % scatter/line chart."""
+    """Create one A4 landscape dashboard page: KPI + large trend chart + monthly comparison.
+
+    Main change: the graph now takes almost the full page width and is no
+    longer squeezed beside the table. The monthly comparison table is placed
+    below the graph so the chart remains visible when printed.
+    """
     width, height = A4_LANDSCAPE_PX
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
     margin_x = 90
     y = 58
-    title_font = get_pil_font(58, bold=True)
+    title_font = get_pil_font(56, bold=True)
     subtitle_font = get_pil_font(27)
     section_font = get_pil_font(31, bold=True)
     header_font = get_pil_font(21, bold=True)
@@ -1454,10 +1448,11 @@ def make_high_res_overview_page(
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     draw.text((margin_x, y), "EDC Cabin Loss Printable Report", font=title_font, fill="#0f172a")
-    y += 70
+    y += 68
     draw.text((margin_x, y), subtitle[:190], font=subtitle_font, fill="#334155")
     y += 58
 
+    # KPI table across the top.
     draw.text((margin_x, y), "Yearly KPI Comparison", font=section_font, fill="#0f172a")
     y += 42
     kpi_display = format_yearly_kpi_table(yearly_kpi_df)
@@ -1472,19 +1467,36 @@ def make_high_res_overview_page(
         cell_font,
         col_weights=[0.8, 1.45, 1.45, 1.45, 1.35, 1.55],
     )
-    y += 64 * (len(kpi_display) + 1) + 36
+    y += 64 * (len(kpi_display) + 1) + 28
 
+    # Large full-width chart.
     chart_w = width - margin_x * 2
-    chart_h = height - y - 88
+    chart_h = 1030
     chart_img = make_loss_curve_png_image_sized(
         loss_by_year,
         title="Loss % Trend by Month",
-        subtitle="Scatter points show monthly loss values for each year.",
+        subtitle="Clean visual trend. Exact monthly values are shown in the table below.",
         width=chart_w,
         height=chart_h,
-        show_point_labels=True,
+        show_point_labels=False,
     )
     img.paste(chart_img, (margin_x, y))
+    y += chart_h + 24
+
+    # Monthly comparison table under the chart.
+    draw.text((margin_x, y), "Monthly Loss % Comparison", font=section_font, fill="#0f172a")
+    y += 42
+    draw_table_on_image(
+        draw,
+        format_loss_comparison_table(loss_compare_df),
+        margin_x,
+        y,
+        width - margin_x * 2,
+        43,
+        get_pil_font(18, bold=True),
+        get_pil_font(17),
+        col_weights=[1.65, 1.0, 1.0, 1.0],
+    )
 
     return img
 
@@ -1494,51 +1506,31 @@ def make_high_res_all_summary_page(
     cabin_type: str,
     ranking_month: str,
     summary_by_year: Dict[int, pd.DataFrame],
-    loss_compare_df: Optional[pd.DataFrame] = None,
 ) -> Image.Image:
-    """Create Page 2: Monthly Loss % Comparison + 2026/2025/2024 summary tables."""
+    """Create one A4 landscape page containing 2026, 2025 and 2024 summary tables."""
     width, height = A4_LANDSCAPE_PX
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    margin_x = 74
-    y = 54
-    title_font = get_pil_font(52, bold=True)
-    subtitle_font = get_pil_font(25)
-    section_font = get_pil_font(27, bold=True)
-    header_font = get_pil_font(16, bold=True)
-    cell_font = get_pil_font(15)
+    margin_x = 85
+    y = 62
+    title_font = get_pil_font(58, bold=True)
+    subtitle_font = get_pil_font(27)
+    section_font = get_pil_font(31, bold=True)
+    header_font = get_pil_font(18, bold=True)
+    cell_font = get_pil_font(17)
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
-    draw.text((margin_x, y), "Summary Page — Monthly Loss + Yearly Summary Tables", font=title_font, fill="#0f172a")
-    y += 64
-    draw.text((margin_x, y), subtitle[:190], font=subtitle_font, fill="#334155")
-    y += 52
+    draw.text((margin_x, y), "Summary Tables — 2026 / 2025 / 2024", font=title_font, fill="#0f172a")
+    y += 72
+    draw.text((margin_x, y), subtitle[:185], font=subtitle_font, fill="#334155")
+    y += 58
 
     table_width = width - margin_x * 2
-
-    # Monthly Loss % Comparison near the top of Page 2.
-    if loss_compare_df is not None and not loss_compare_df.empty:
-        draw.text((margin_x, y), "Monthly Loss % Comparison", font=section_font, fill="#0f172a")
-        y += 36
-        y = draw_table_on_image(
-            draw,
-            format_loss_comparison_table(loss_compare_df),
-            margin_x,
-            y,
-            table_width,
-            42,
-            get_pil_font(15, bold=True),
-            get_pil_font(14),
-            col_weights=[1.75, 1.0, 1.0, 1.0],
-        )
-        y += 24
-
-    # Three yearly summaries stacked on the same A4 landscape page.
-    summary_weights = [1.28, 0.50] + [0.86] * 12 + [1.26, 1.05]
+    summary_weights = [1.35, 0.55] + [0.88] * 12 + [1.35, 1.12]
     for year in [2026, 2025, 2024]:
         draw.text((margin_x, y), f"Summary Table ({year})", font=section_font, fill="#0f172a")
-        y += 34
+        y += 42
         if year in summary_by_year:
             y = draw_table_on_image(
                 draw,
@@ -1546,23 +1538,24 @@ def make_high_res_all_summary_page(
                 margin_x,
                 y,
                 table_width,
-                48,
+                66,
                 header_font,
                 cell_font,
                 col_weights=summary_weights,
             )
-            y += 24
+            y += 38
         else:
             draw.text((margin_x, y), f"No {year} data available for this cabin.", font=cell_font, fill="#64748b")
-            y += 68
+            y += 80
 
     draw.text(
-        (margin_x, height - 42),
+        (margin_x, height - 55),
         "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
-        font=get_pil_font(20),
+        font=get_pil_font(23),
         fill="#64748b",
     )
     return img
+
 
 def build_high_res_png_pages_zip_bytes(
     province: str,
@@ -1583,7 +1576,7 @@ def build_high_res_png_pages_zip_bytes(
     ))
     pages.append((
         safe_filename(f"02_{province}_Cabin_{safe_cabin}_All_Summary_Tables_A4_Landscape_300DPI.png"),
-        make_high_res_all_summary_page(province, cabin_name, cabin_type, ranking_month, summary_by_year, loss_compare_df),
+        make_high_res_all_summary_page(province, cabin_name, cabin_type, ranking_month, summary_by_year),
     ))
 
     zip_buffer = io.BytesIO()
@@ -1720,23 +1713,28 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build a two-page A4 landscape PDF using direct ReportLab canvas drawing.
+    """Build a two-page A4 landscape PDF using full-page 300-DPI report images.
 
-    Why canvas instead of SimpleDocTemplate:
-    SimpleDocTemplate creates an internal frame that is slightly smaller than
-    the physical A4 page. A full-page image can therefore fail with:
-    "Flowable Image too large on page". Direct canvas drawing avoids that
-    frame limit and fits the A4 report images exactly.
+    This avoids the graph becoming too small inside ReportLab table cells.
+    Page 1: KPI + large loss trend chart + monthly comparison.
+    Page 2: 2026, 2025 and 2024 summary tables together.
     """
     try:
         from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.utils import ImageReader
-        from reportlab.pdfgen import canvas
+        from reportlab.platypus import SimpleDocTemplate, Image as RLImage, PageBreak
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
     page_size = landscape(A4)
-    page_w, page_h = page_size
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=page_size,
+        leftMargin=0,
+        rightMargin=0,
+        topMargin=0,
+        bottomMargin=0,
+    )
 
     overview_img = make_high_res_overview_page(
         province=province,
@@ -1753,33 +1751,15 @@ def make_printable_selected_report_pdf_bytes(
         cabin_type=cabin_type,
         ranking_month=ranking_month,
         summary_by_year=summary_by_year,
-        loss_compare_df=loss_compare_df,
     )
 
-    def _draw_full_page_image(pdf_canvas, pil_img: Image.Image):
-        img_buffer = io.BytesIO()
-        pil_img.save(img_buffer, format="PNG", optimize=True, dpi=(PRINT_DPI, PRINT_DPI))
-        img_buffer.seek(0)
-        pdf_canvas.drawImage(
-            ImageReader(img_buffer),
-            0,
-            0,
-            width=page_w,
-            height=page_h,
-            preserveAspectRatio=False,
-            mask="auto",
-        )
+    story = [
+        RLImage(io.BytesIO(image_to_png_bytes(overview_img, dpi=PRINT_DPI)), width=page_size[0], height=page_size[1]),
+        PageBreak(),
+        RLImage(io.BytesIO(image_to_png_bytes(summary_img, dpi=PRINT_DPI)), width=page_size[0], height=page_size[1]),
+    ]
 
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=page_size)
-
-    _draw_full_page_image(pdf, overview_img)
-    pdf.showPage()
-
-    _draw_full_page_image(pdf, summary_img)
-    pdf.showPage()
-
-    pdf.save()
+    doc.build(story)
     return buffer.getvalue()
 
 def build_selected_pdf_report_package_zip_bytes(
