@@ -1713,28 +1713,23 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build a two-page A4 landscape PDF using full-page 300-DPI report images.
+    """Build a two-page A4 landscape PDF using direct ReportLab canvas drawing.
 
-    This avoids the graph becoming too small inside ReportLab table cells.
-    Page 1: KPI + large loss trend chart + monthly comparison.
-    Page 2: 2026, 2025 and 2024 summary tables together.
+    Why canvas instead of SimpleDocTemplate:
+    SimpleDocTemplate creates an internal frame that is slightly smaller than
+    the physical A4 page. A full-page image can therefore fail with:
+    "Flowable Image too large on page". Direct canvas drawing avoids that
+    frame limit and fits the A4 report images exactly.
     """
     try:
         from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.platypus import SimpleDocTemplate, Image as RLImage, PageBreak
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
     page_size = landscape(A4)
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=page_size,
-        leftMargin=0,
-        rightMargin=0,
-        topMargin=0,
-        bottomMargin=0,
-    )
+    page_w, page_h = page_size
 
     overview_img = make_high_res_overview_page(
         province=province,
@@ -1753,13 +1748,30 @@ def make_printable_selected_report_pdf_bytes(
         summary_by_year=summary_by_year,
     )
 
-    story = [
-        RLImage(io.BytesIO(image_to_png_bytes(overview_img, dpi=PRINT_DPI)), width=page_size[0], height=page_size[1]),
-        PageBreak(),
-        RLImage(io.BytesIO(image_to_png_bytes(summary_img, dpi=PRINT_DPI)), width=page_size[0], height=page_size[1]),
-    ]
+    def _draw_full_page_image(pdf_canvas, pil_img: Image.Image):
+        img_buffer = io.BytesIO()
+        pil_img.save(img_buffer, format="PNG", optimize=True, dpi=(PRINT_DPI, PRINT_DPI))
+        img_buffer.seek(0)
+        pdf_canvas.drawImage(
+            ImageReader(img_buffer),
+            0,
+            0,
+            width=page_w,
+            height=page_h,
+            preserveAspectRatio=False,
+            mask="auto",
+        )
 
-    doc.build(story)
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=page_size)
+
+    _draw_full_page_image(pdf, overview_img)
+    pdf.showPage()
+
+    _draw_full_page_image(pdf, summary_img)
+    pdf.showPage()
+
+    pdf.save()
     return buffer.getvalue()
 
 def build_selected_pdf_report_package_zip_bytes(
