@@ -1116,8 +1116,8 @@ def make_printable_selected_report_png_bytes(
     margin = 36
     gap = 24
     header_h = 120
-    report_w = max([kpi_img.width, chart_img.width, loss_compare_img.width, *[img.width for img in table_images]]) + margin * 2
-    report_h = header_h + kpi_img.height + gap + chart_img.height + gap + loss_compare_img.height + gap
+    report_w = max([kpi_img.width, loss_compare_img.width, *[img.width for img in table_images]]) + margin * 2
+    report_h = header_h + kpi_img.height + gap + loss_compare_img.height + gap
     report_h += sum(img.height for img in table_images) + gap * len(table_images) + margin
 
     report = Image.new("RGB", (report_w, report_h), "white")
@@ -1137,7 +1137,7 @@ def make_printable_selected_report_png_bytes(
     )
 
     y = header_h
-    for img in [kpi_img, chart_img, loss_compare_img, *table_images]:
+    for img in [kpi_img, loss_compare_img, *table_images]:
         report.paste(img, (margin, y))
         y += img.height + gap
 
@@ -1440,18 +1440,7 @@ def build_high_res_png_pages_zip_bytes(
     ))
 
     pages.append((
-        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Loss_Trend_A4_Landscape_300DPI.png"),
-        make_loss_curve_png_image_sized(
-            loss_by_year,
-            title="Loss % Trend by Month",
-            subtitle=subtitle,
-            width=A4_LANDSCAPE_PX[0],
-            height=A4_LANDSCAPE_PX[1],
-        ),
-    ))
-
-    pages.append((
-        safe_filename(f"03_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Landscape_300DPI.png"),
+        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Landscape_300DPI.png"),
         make_high_res_table_page(
             format_loss_comparison_table(loss_compare_df),
             title="Monthly Loss % Comparison",
@@ -1461,7 +1450,7 @@ def build_high_res_png_pages_zip_bytes(
         ),
     ))
 
-    page_no = 4
+    page_no = 3
     summary_weights = [1.45, 0.62] + [1.0] * 12 + [1.55, 1.35]
     for year in [2026, 2025, 2024]:
         if year not in summary_by_year:
@@ -1602,10 +1591,7 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build an A4 landscape PDF without the Loss % Trend chart page.
-
-The PDF now contains KPI, Monthly Loss % Comparison, and yearly summary tables only.
-"""
+    """Build an A4 landscape PDF with KPI, monthly comparison, and yearly summary tables only."""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
@@ -2172,7 +2158,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v6_no_loss_trend_pdf"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v8_removed_loss_trend_report"
 
 for state_key in [
     "report_cache_key",
