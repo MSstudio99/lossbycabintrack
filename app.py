@@ -1193,28 +1193,23 @@ def make_loss_curve_png_image_sized(
     title: str,
     subtitle: Optional[str] = None,
     width: int = 3200,
-    height: int = 1500,
+    height: int = 1450,
 ) -> Image.Image:
     """High-resolution readable loss chart for print/PDF export.
 
-    Fixes:
-    - larger X/Y axis labels
-    - larger Y tick values
-    - larger month labels
-    - larger value labels
-    - larger markers
-    - thicker lines
-    - more vertical space so labels are not crowded
+    The important fix is not only bigger fonts. The chart must also be created
+    with a taller canvas and placed in the PDF without being flattened.
     """
-    margin_l = 230
-    margin_r = 130
+    margin_l = 235
+    margin_r = 135
     margin_t = 245
-    margin_b = 170
+    margin_b = 175
 
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    font_title = get_pil_font(72, bold=True)
+    # Large fonts for exported PDF/PNG report.
+    font_title = get_pil_font(74, bold=True)
     font_subtitle = get_pil_font(38)
     font_axis = get_pil_font(54, bold=True)
     font_tick = get_pil_font(46, bold=True)
@@ -1223,7 +1218,7 @@ def make_loss_curve_png_image_sized(
 
     draw.text((40, 34), title, font=font_title, fill="#0f172a")
     if subtitle:
-        draw.text((40, 122), subtitle[:160], font=font_subtitle, fill="#475569")
+        draw.text((40, 124), subtitle[:160], font=font_subtitle, fill="#475569")
 
     plot_x1, plot_y1 = margin_l, margin_t
     plot_x2, plot_y2 = width - margin_r, height - margin_b
@@ -1232,10 +1227,10 @@ def make_loss_curve_png_image_sized(
     if not all_values:
         all_values = [0.0]
 
-    # Use tighter Y range so the trend is visible and not flattened.
+    # Tight Y-scale so the line movement is visible, similar to your sample plot.
     raw_min = min(all_values)
     raw_max = max(all_values)
-    y_min = min(0, math.floor(raw_min * 10) / 10)
+    y_min = min(0.0, math.floor(raw_min * 10) / 10)
     y_max = max(1.0, math.ceil(raw_max * 10) / 10)
     if y_max == y_min:
         y_max = y_min + 1.0
@@ -1244,10 +1239,10 @@ def make_loss_curve_png_image_sized(
     y_min -= y_padding
     y_max += y_padding
 
-    # Plot background and grid.
+    # Plot background and border.
     draw.rectangle([plot_x1, plot_y1, plot_x2, plot_y2], fill="#ffffff", outline="#cbd5e1", width=5)
 
-    # Y grid/ticks.
+    # Y-axis grid and labels.
     for i in range(6):
         y_val = y_min + (y_max - y_min) * i / 5
         y = plot_y2 - (y_val - y_min) / (y_max - y_min) * (plot_y2 - plot_y1)
@@ -1259,37 +1254,37 @@ def make_loss_curve_png_image_sized(
     draw.line([(plot_x1, plot_y2), (plot_x2, plot_y2)], fill="#0f172a", width=8)
 
     # Axis titles.
-    draw.text((plot_x1 + (plot_x2 - plot_x1) / 2 - 90, height - 64), "Month", font=font_axis, fill="#0f172a")
-    draw.text((45, plot_y1 - 70), "Loss %", font=font_axis, fill="#0f172a")
+    draw.text((plot_x1 + (plot_x2 - plot_x1) / 2 - 90, height - 70), "Month", font=font_axis, fill="#0f172a")
+    draw.text((42, plot_y1 - 76), "Loss %", font=font_axis, fill="#0f172a")
 
-    # X ticks/month labels.
+    # X-axis ticks and labels.
     x_positions = []
     for idx, month in enumerate(MONTHS):
         x = plot_x1 + idx * (plot_x2 - plot_x1) / (len(MONTHS) - 1)
         x_positions.append(x)
         draw.line([(x, plot_y1), (x, plot_y2)], fill="#eef2f7", width=3)
-        draw.line([(x, plot_y2), (x, plot_y2 + 18)], fill="#0f172a", width=5)
-        draw_centered_text(draw, (x - 80, plot_y2 + 34, x + 80, plot_y2 + 105), month, font_tick, "#0f172a")
+        draw.line([(x, plot_y2), (x, plot_y2 + 20)], fill="#0f172a", width=5)
+        draw_centered_text(draw, (x - 84, plot_y2 + 38, x + 84, plot_y2 + 112), month, font_tick, "#0f172a")
 
     year_styles = {
-        2024: {"color": "#f59e0b", "label_offset": -115},
-        2025: {"color": "#7c3aed", "label_offset": 80},
-        2026: {"color": "#dc2626", "label_offset": -205},
+        2024: {"color": "#f59e0b", "label_offset": -118},
+        2025: {"color": "#7c3aed", "label_offset": 82},
+        2026: {"color": "#dc2626", "label_offset": -210},
     }
 
-    # Horizontal legend.
+    # Horizontal legend with large markers.
     legend_x = width - 1040
     legend_y = 52
     for idx, year in enumerate(sorted(loss_by_year)):
         color = year_styles.get(year, {"color": "#334155"})["color"]
         lx = legend_x + idx * 330
         draw.line([(lx, legend_y + 32), (lx + 105, legend_y + 32)], fill=color, width=14)
-        draw.ellipse([lx + 40, legend_y + 12, lx + 76, legend_y + 48], fill=color, outline="white", width=5)
+        draw.ellipse([lx + 39, legend_y + 12, lx + 77, legend_y + 50], fill=color, outline="white", width=5)
         draw.text((lx + 128, legend_y + 2), f"{year}", font=font_legend, fill="#0f172a")
 
-    # Plot each year.
+    # Plot each year's curve.
     for year in sorted(loss_by_year):
-        style = year_styles.get(year, {"color": "#334155", "label_offset": -115})
+        style = year_styles.get(year, {"color": "#334155", "label_offset": -118})
         color = style["color"]
         label_offset = style["label_offset"]
         values = [float(v) if v is not None else 0.0 for v in loss_by_year[year]]
@@ -1305,9 +1300,10 @@ def make_loss_curve_png_image_sized(
             draw.line(curve, fill=color, width=13)
 
         for idx, (x, y) in enumerate(points):
-            # Bigger marker for PDF readability.
-            draw.ellipse([x - 24, y - 24, x + 24, y + 24], fill=color, outline="white", width=7)
+            # Large marker.
+            draw.ellipse([x - 25, y - 25, x + 25, y + 25], fill=color, outline="white", width=7)
 
+            # Large value label with white background.
             label = f"{values[idx]:.2f}%"
             bbox = draw.textbbox((0, 0), label, font=font_label)
             label_w = bbox[2] - bbox[0]
@@ -1432,7 +1428,6 @@ def make_high_res_overview_page(
     y = 80
     title_font = get_pil_font(68, bold=True)
     subtitle_font = get_pil_font(34)
-    note_font = get_pil_font(28)
     header_font = get_pil_font(30, bold=True)
     cell_font = get_pil_font(30)
 
@@ -1456,14 +1451,14 @@ def make_high_res_overview_page(
         cell_font,
         col_weights=[0.8, 1.5, 1.5, 1.5, 1.4, 1.6],
     )
-    y += 92 * (len(kpi_display) + 1) + 40
+    y += 92 * (len(kpi_display) + 1) + 32
 
     chart_img = make_loss_curve_png_image_sized(
         loss_by_year,
         title="Loss % Trend by Month",
         subtitle=subtitle,
         width=width - margin_x * 2,
-        height=1500,
+        height=1450,
     )
     img.paste(chart_img, (margin_x, y))
     return img
@@ -1721,11 +1716,28 @@ def make_printable_selected_report_pdf_bytes(
     story.append(Spacer(1, 12))
 
     story.append(Paragraph("Loss % Trend by Month", h2_style))
-    chart_png = image_to_png_bytes(
-        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=2600, height=780),
-        dpi=PRINT_DPI,
+
+    # Build a tall, high-resolution chart, then place it without flattening.
+    chart_img = make_loss_curve_png_image_sized(
+        loss_by_year,
+        "Loss % Trend by Month",
+        subtitle,
+        width=3200,
+        height=1450,
     )
-    story.append(RLImage(io.BytesIO(chart_png), width=min(usable_w, 10.4 * inch), height=3.1 * inch))
+    chart_png = image_to_png_bytes(chart_img, dpi=PRINT_DPI)
+
+    # Keep aspect ratio like the sample plot. Do not force a short 3.1-inch height.
+    chart_w = min(usable_w, 10.6 * inch)
+    chart_h = chart_w * chart_img.height / chart_img.width
+
+    # A4 landscape page still needs room for the KPI table above.
+    max_chart_h = 4.45 * inch
+    if chart_h > max_chart_h:
+        chart_h = max_chart_h
+        chart_w = chart_h * chart_img.width / chart_img.height
+
+    story.append(RLImage(io.BytesIO(chart_png), width=chart_w, height=chart_h))
 
     # Page 2 - monthly comparison.
     story.append(PageBreak())
