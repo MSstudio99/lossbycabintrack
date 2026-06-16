@@ -1654,6 +1654,63 @@ def build_selected_pdf_report_package_zip_bytes(
     return zip_buffer.getvalue()
 
 
+def is_reportlab_available() -> bool:
+    """Return True only when reportlab is installed in the Streamlit environment."""
+    try:
+        import reportlab  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def build_selected_print_report_package_zip_bytes(
+    province: str,
+    cabin_name: str,
+    ranking_month: str,
+    report_pdf_bytes: Optional[bytes],
+    png_pages_zip_bytes: bytes,
+    visible_ranking_df: pd.DataFrame,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_compare_df: pd.DataFrame,
+    yearly_kpi_df: pd.DataFrame,
+) -> bytes:
+    """ZIP package that never depends on reportlab.
+
+    If PDF bytes exist, include the PDF. Always include the A4 300 DPI PNG
+    pages ZIP and CSV support files so the export still works when reportlab
+    is missing from Streamlit Cloud.
+    """
+    zip_buffer = io.BytesIO()
+    safe_cabin = safe_filename(cabin_name)
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        if report_pdf_bytes:
+            zipf.writestr(
+                safe_filename(f"{province}_Cabin_{safe_cabin}_{ranking_month}_{LATEST_YEAR}_Printable_Report.pdf"),
+                report_pdf_bytes,
+            )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
+            png_pages_zip_bytes,
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_Visible_Ranking.csv"),
+            build_ranking_csv_bytes(visible_ranking_df),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Summary_2024_2025_2026.csv"),
+            build_all_year_summary_csv(summary_by_year),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Loss_Comparison.csv"),
+            loss_compare_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+        zipf.writestr(
+            safe_filename(f"{province}_Cabin_{safe_cabin}_Yearly_KPI.csv"),
+            yearly_kpi_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+    return zip_buffer.getvalue()
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -1992,92 +2049,166 @@ st.divider()
 # ---------------------------------------------------------
 st.subheader("Print-Ready Export — Selected Cabin Only")
 st.caption(
-    "For printing, PDF is the main export because text and tables stay sharp. "
-    "High-resolution PNG export is now split into A4 300 DPI pages instead of one blurry long image."
+    "For printing, PDF is best when reportlab is installed. "
+    "The app always creates A4 300 DPI PNG pages, so export still works even if PDF support is missing."
 )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v2"
+pdf_supported = is_reportlab_available()
+if not pdf_supported:
+    st.warning(
+        "PDF export is currently disabled because `reportlab` is not installed in this Streamlit environment. "
+        "The app will still build high-resolution A4 PNG pages and CSV files. "
+        "To enable PDF, add `reportlab` to requirements.txt and redeploy."
+    )
 
-if "report_cache_key" not in st.session_state:
-    st.session_state["report_cache_key"] = None
-if "report_pdf_bytes" not in st.session_state:
-    st.session_state["report_pdf_bytes"] = None
-if "report_png_pages_zip_bytes" not in st.session_state:
-    st.session_state["report_png_pages_zip_bytes"] = None
-if "report_package_zip_bytes" not in st.session_state:
-    st.session_state["report_package_zip_bytes"] = None
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v3"
+
+for state_key in [
+    "report_cache_key",
+    "report_pdf_bytes",
+    "report_png_pages_zip_bytes",
+    "report_package_zip_bytes",
+    "report_export_warning",
+    "report_export_error",
+]:
+    if state_key not in st.session_state:
+        st.session_state[state_key] = None
 
 if st.button("Build print-ready report", type="primary"):
-    with st.spinner("Building print-ready PDF and high-resolution PNG pages..."):
-        report_pdf = make_printable_selected_report_pdf_bytes(
-            province=province,
-            cabin_name=resolved_name,
-            cabin_type=str(selected_row["type"]),
-            ranking_month=ranking_month,
-            summary_by_year=summary_by_year,
-            loss_by_year=loss_by_year,
-            yearly_kpi_df=yearly_kpi_df,
-            loss_compare_df=loss_compare_df,
-        )
-        png_pages_zip = build_high_res_png_pages_zip_bytes(
-            province=province,
-            cabin_name=resolved_name,
-            cabin_type=str(selected_row["type"]),
-            ranking_month=ranking_month,
-            summary_by_year=summary_by_year,
-            loss_by_year=loss_by_year,
-            yearly_kpi_df=yearly_kpi_df,
-            loss_compare_df=loss_compare_df,
-        )
-        report_package_zip = build_selected_pdf_report_package_zip_bytes(
-            province=province,
-            cabin_name=resolved_name,
-            ranking_month=ranking_month,
-            report_pdf_bytes=report_pdf,
-            visible_ranking_df=visible_ranking_df,
-            summary_by_year=summary_by_year,
-            loss_compare_df=loss_compare_df,
-            yearly_kpi_df=yearly_kpi_df,
+    st.session_state["report_cache_key"] = None
+    st.session_state["report_pdf_bytes"] = None
+    st.session_state["report_png_pages_zip_bytes"] = None
+    st.session_state["report_package_zip_bytes"] = None
+    st.session_state["report_export_warning"] = None
+    st.session_state["report_export_error"] = None
+
+    try:
+        spinner_text = "Building print-ready report..."
+        if pdf_supported:
+            spinner_text = "Building PDF plus high-resolution A4 PNG pages..."
+        else:
+            spinner_text = "Building high-resolution A4 PNG pages and CSV package..."
+
+        with st.spinner(spinner_text):
+            # Build PNG pages first because this path has no external PDF dependency.
+            png_pages_zip = build_high_res_png_pages_zip_bytes(
+                province=province,
+                cabin_name=resolved_name,
+                cabin_type=str(selected_row["type"]),
+                ranking_month=ranking_month,
+                summary_by_year=summary_by_year,
+                loss_by_year=loss_by_year,
+                yearly_kpi_df=yearly_kpi_df,
+                loss_compare_df=loss_compare_df,
+            )
+
+            report_pdf = None
+            if pdf_supported:
+                try:
+                    report_pdf = make_printable_selected_report_pdf_bytes(
+                        province=province,
+                        cabin_name=resolved_name,
+                        cabin_type=str(selected_row["type"]),
+                        ranking_month=ranking_month,
+                        summary_by_year=summary_by_year,
+                        loss_by_year=loss_by_year,
+                        yearly_kpi_df=yearly_kpi_df,
+                        loss_compare_df=loss_compare_df,
+                    )
+                except Exception as exc:
+                    report_pdf = None
+                    st.session_state["report_export_warning"] = (
+                        "PDF could not be built, but high-resolution PNG pages were created. "
+                        f"PDF error: {exc}"
+                    )
+            else:
+                st.session_state["report_export_warning"] = (
+                    "PDF was skipped because reportlab is not installed. "
+                    "Use the A4 PNG pages ZIP, or add reportlab to requirements.txt and redeploy."
+                )
+
+            report_package_zip = build_selected_print_report_package_zip_bytes(
+                province=province,
+                cabin_name=resolved_name,
+                ranking_month=ranking_month,
+                report_pdf_bytes=report_pdf,
+                png_pages_zip_bytes=png_pages_zip,
+                visible_ranking_df=visible_ranking_df,
+                summary_by_year=summary_by_year,
+                loss_compare_df=loss_compare_df,
+                yearly_kpi_df=yearly_kpi_df,
+            )
+
+            st.session_state["report_cache_key"] = report_key
+            st.session_state["report_pdf_bytes"] = report_pdf
+            st.session_state["report_png_pages_zip_bytes"] = png_pages_zip
+            st.session_state["report_package_zip_bytes"] = report_package_zip
+
+    except Exception as exc:
+        st.session_state["report_export_error"] = (
+            "Could not build the print-ready export. "
+            "Please check the selected cabin data and try again. "
+            f"Details: {exc}"
         )
 
-        st.session_state["report_cache_key"] = report_key
-        st.session_state["report_pdf_bytes"] = report_pdf
-        st.session_state["report_png_pages_zip_bytes"] = png_pages_zip
-        st.session_state["report_package_zip_bytes"] = report_package_zip
+if st.session_state.get("report_export_error"):
+    st.error(st.session_state["report_export_error"])
 
-if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_pdf_bytes"):
+if st.session_state.get("report_export_warning"):
+    st.warning(st.session_state["report_export_warning"])
+
+if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_png_pages_zip_bytes"):
     safe_cabin_name = safe_filename(resolved_name)
-    st.success("Print-ready report is ready.")
+    st.success("Print-ready export is ready.")
 
-    col_pdf, col_png, col_zip = st.columns(3)
-    with col_pdf:
-        st.download_button(
-            "Download PDF report",
-            data=st.session_state["report_pdf_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
-            mime="application/pdf",
-            use_container_width=True,
-        )
-    with col_png:
-        st.download_button(
-            "Download A4 PNG pages ZIP",
-            data=st.session_state["report_png_pages_zip_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
-            mime="application/zip",
-            use_container_width=True,
-        )
-    with col_zip:
-        st.download_button(
-            "Download PDF + CSV package",
-            data=st.session_state["report_package_zip_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_pdf_csv_package.zip"),
-            mime="application/zip",
-            use_container_width=True,
-        )
+    if st.session_state.get("report_pdf_bytes"):
+        col_pdf, col_png, col_zip = st.columns(3)
+        with col_pdf:
+            st.download_button(
+                "Download PDF report",
+                data=st.session_state["report_pdf_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with col_png:
+            st.download_button(
+                "Download A4 PNG pages ZIP",
+                data=st.session_state["report_png_pages_zip_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
+                mime="application/zip",
+                use_container_width=True,
+            )
+        with col_zip:
+            st.download_button(
+                "Download PDF/PNG + CSV package",
+                data=st.session_state["report_package_zip_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_print_package.zip"),
+                mime="application/zip",
+                use_container_width=True,
+            )
+    else:
+        col_png, col_zip = st.columns(2)
+        with col_png:
+            st.download_button(
+                "Download A4 PNG pages ZIP",
+                data=st.session_state["report_png_pages_zip_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
+                mime="application/zip",
+                use_container_width=True,
+            )
+        with col_zip:
+            st.download_button(
+                "Download PNG + CSV package",
+                data=st.session_state["report_package_zip_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_png_csv_package.zip"),
+                mime="application/zip",
+                use_container_width=True,
+            )
 
 with st.expander("Why the old single PNG export was replaced"):
     st.write(
         "A single long PNG is a raster image. When it is stretched or scaled for printing, text becomes blurry. "
-        "This version uses PDF as the main print export and, if PNG is needed, creates separate A4 landscape pages at 300 DPI. "
-        "This is sharper and more stable than generating one very tall image."
+        "This version uses PDF when available and always creates separate A4 landscape PNG pages at 300 DPI. "
+        "It also avoids crashing if PDF support is missing from Streamlit Cloud."
     )
