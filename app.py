@@ -1419,6 +1419,70 @@ def make_high_res_overview_page(
     )
     return img
 
+
+def make_high_res_all_summary_tables_one_page(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    summary_by_year: Dict[int, pd.DataFrame],
+) -> Image.Image:
+    """Create one A4 landscape page containing 2026, 2025, and 2024 summary tables."""
+    width, height = A4_LANDSCAPE_PX
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    margin_x = 70
+    y = 62
+    title_font = get_pil_font(60, bold=True)
+    subtitle_font = get_pil_font(30)
+    section_font = get_pil_font(36, bold=True)
+    header_font = get_pil_font(27, bold=True)
+    cell_font = get_pil_font(26)
+
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+
+    draw.text((margin_x, y), "Summary Tables — 2026, 2025, 2024", font=title_font, fill="#0f172a")
+    y += 76
+    draw.text((margin_x, y), subtitle[:185], font=subtitle_font, fill="#475569")
+    y += 70
+
+    table_width = width - margin_x * 2
+    summary_weights = [1.45, 0.62] + [1.0] * 12 + [1.55, 1.35]
+    row_h = 108
+
+    for year in [2026, 2025, 2024]:
+        draw.text((margin_x, y), f"Summary Table ({year}) - Full Year", font=section_font, fill="#0f172a")
+        y += 46
+
+        if year in summary_by_year:
+            y = draw_table_on_image(
+                draw,
+                _summary_display_full_for_report(summary_by_year[year]),
+                margin_x,
+                y,
+                table_width,
+                row_h,
+                header_font,
+                cell_font,
+                col_weights=summary_weights,
+            )
+        else:
+            draw.text((margin_x, y), f"No {year} data available for this cabin.", font=cell_font, fill="#64748b")
+            y += row_h
+
+        y += 34
+
+    draw.text(
+        (margin_x, height - 42),
+        "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
+        font=get_pil_font(22),
+        fill="#64748b",
+    )
+
+    return img
+
+
 def build_high_res_png_pages_zip_bytes(
     province: str,
     cabin_name: str,
@@ -1450,22 +1514,16 @@ def build_high_res_png_pages_zip_bytes(
         ),
     ))
 
-    page_no = 3
-    summary_weights = [1.45, 0.62] + [1.0] * 12 + [1.55, 1.35]
-    for year in [2026, 2025, 2024]:
-        if year not in summary_by_year:
-            continue
-        pages.append((
-            safe_filename(f"{page_no:02d}_{province}_Cabin_{safe_cabin}_Summary_{year}_Full_Year_A4_Landscape_300DPI.png"),
-            make_high_res_table_page(
-                _summary_display_full_for_report(summary_by_year[year]),
-                title=f"Summary Table ({year}) - Full Year",
-                subtitle=subtitle,
-                col_weights=summary_weights,
-                row_h=135,
-            ),
-        ))
-        page_no += 1
+    pages.append((
+        safe_filename(f"03_{province}_Cabin_{safe_cabin}_Summary_2026_2025_2024_A4_Landscape_300DPI.png"),
+        make_high_res_all_summary_tables_one_page(
+            province=province,
+            cabin_name=cabin_name,
+            cabin_type=cabin_type,
+            ranking_month=ranking_month,
+            summary_by_year=summary_by_year,
+        ),
+    ))
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -1687,14 +1745,16 @@ def make_printable_selected_report_pdf_bytes(
         numeric_start_col=1,
     ))
 
-    # Pages 4+ - each yearly summary in one full landscape page.
-    summary_widths = [0.78 * inch, 0.42 * inch] + [0.48 * inch] * 12 + [0.68 * inch, 0.58 * inch]
-    for year in [2026, 2025, 2024]:
-        story.append(PageBreak())
-        story.append(Paragraph(f"Summary Table ({year}) - Full Year", h1_style))
-        story.append(Paragraph(subtitle, small_style))
-        story.append(Spacer(1, 8))
+    # Page 3 - all yearly summaries together on one landscape page.
+    story.append(PageBreak())
+    story.append(Paragraph("Summary Tables — 2026, 2025, 2024", h1_style))
+    story.append(Paragraph(subtitle, small_style))
+    story.append(Spacer(1, 6))
 
+    summary_widths = [0.78 * inch, 0.42 * inch] + [0.48 * inch] * 12 + [0.68 * inch, 0.58 * inch]
+
+    for year in [2026, 2025, 2024]:
+        story.append(Paragraph(f"Summary Table ({year}) - Full Year", h2_style))
         if year in summary_by_year:
             story.append(_reportlab_table(
                 _summary_display_full_for_report(summary_by_year[year]),
@@ -1703,13 +1763,14 @@ def make_printable_selected_report_pdf_bytes(
                 header_font_size=7.5,
                 numeric_start_col=2,
             ))
-            story.append(Spacer(1, 8))
-            story.append(Paragraph(
-                "Note: Gap = Total - Sale. Loss % is calculated as (1 - Sale / Total) × 100.",
-                small_style,
-            ))
         else:
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
+        story.append(Spacer(1, 7))
+
+    story.append(Paragraph(
+        "Note: Gap = Total - Sale. Loss % is calculated as (1 - Sale / Total) × 100.",
+        small_style,
+    ))
 
     doc.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
     return buffer.getvalue()
@@ -2158,7 +2219,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v8_removed_loss_trend_report"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v9_three_summary_tables_one_page"
 
 for state_key in [
     "report_cache_key",
