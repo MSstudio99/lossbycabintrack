@@ -1295,7 +1295,7 @@ else:
 st.divider()
 
 # ---------------------------------------------------------
-# Cabin selector
+# Cabin selector + quick cabin controls
 # ---------------------------------------------------------
 if cabin_type_filter == "All":
     cabin_options_df = cabin_meta_2026.copy()
@@ -1306,25 +1306,126 @@ if cabin_options_df.empty:
     st.warning("No cabin found for the selected cabin type filter.")
     st.stop()
 
+# Default cabin comes from the highest visible ranking row when available.
 ranked_default_key = visible_ranking_df.iloc[0]["__cabin_key"] if not visible_ranking_df.empty else cabin_options_df.iloc[0]["__cabin_key"]
 default_row = get_row_from_meta(meta_2026_indexed, ranked_default_key)
 default_cabin_text = str(default_row["display_name"]) if default_row is not None else str(cabin_options_df.iloc[0]["display_name"])
 
-st.markdown("### Open cabin summary")
-st.caption("Type the cabin number/name. Exact match opens directly; partial match works only when it finds one cabin.")
+# Stable session key lets the buttons and spinner update the typed search box.
+cabin_search_key = f"cabin_search_{province}_{cabin_type_filter}"
+if cabin_search_key not in st.session_state:
+    st.session_state[cabin_search_key] = default_cabin_text
 
-col_search, col_hint = st.columns([2, 1])
+st.markdown("### Open cabin summary")
+st.caption(
+    "Use the typed search for exact cabin lookup, or use the quick controls to browse cabins without typing. "
+    "The summary tables below update in the same page."
+)
+
+# First row: typed search + availability.
+col_search, col_available = st.columns([2.4, 0.8])
 with col_search:
-    cabin_query = st.text_input(
+    st.text_input(
         "Cabin number/name",
-        value=default_cabin_text,
         placeholder="Example: 1234 or Cabin name",
-        key=f"cabin_search_{province}_{cabin_type_filter}",
+        key=cabin_search_key,
     )
 
-with col_hint:
+with col_available:
     st.metric("Available under filter", len(cabin_options_df))
 
+# Resolve current typed text before rendering navigation controls.
+current_query = st.session_state.get(cabin_search_key, "")
+current_key_for_nav, _, _ = resolve_cabin_text_input(cabin_options_df, current_query)
+
+browse_df = cabin_options_df.reset_index(drop=True)
+browse_keys = browse_df["__cabin_key"].tolist()
+
+if current_key_for_nav in browse_keys:
+    current_pos = browse_keys.index(current_key_for_nav)
+elif ranked_default_key in browse_keys:
+    current_pos = browse_keys.index(ranked_default_key)
+else:
+    current_pos = 0
+
+# Second row: spinner + previous/next buttons.
+st.markdown("#### Quick cabin controls")
+col_spin, col_open_no, col_prev, col_next = st.columns([1.1, 0.8, 0.8, 0.8])
+
+with col_spin:
+    cabin_number_choice = st.number_input(
+        "Cabin position",
+        min_value=1,
+        max_value=max(1, len(browse_keys)),
+        value=min(current_pos + 1, max(1, len(browse_keys))),
+        step=1,
+        help="Browse by the current filtered cabin list.",
+        key=f"cabin_position_{province}_{cabin_type_filter}",
+    )
+
+with col_open_no:
+    st.write("")
+    st.write("")
+    if st.button("Open #", key=f"open_cabin_number_{province}_{cabin_type_filter}", use_container_width=True):
+        target_key = browse_keys[int(cabin_number_choice) - 1]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[cabin_search_key] = str(target_row["display_name"])
+            st.rerun()
+
+with col_prev:
+    st.write("")
+    st.write("")
+    if st.button("◀ Previous", key=f"previous_cabin_{province}_{cabin_type_filter}", use_container_width=True):
+        target_pos = max(0, current_pos - 1)
+        target_key = browse_keys[target_pos]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[cabin_search_key] = str(target_row["display_name"])
+            st.rerun()
+
+with col_next:
+    st.write("")
+    st.write("")
+    if st.button("Next ▶", key=f"next_cabin_{province}_{cabin_type_filter}", use_container_width=True):
+        target_pos = min(len(browse_keys) - 1, current_pos + 1)
+        target_key = browse_keys[target_pos]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[cabin_search_key] = str(target_row["display_name"])
+            st.rerun()
+
+# Third row: click from visible ranking, useful for investigation workflow.
+if not visible_ranking_df.empty:
+    rank_options = visible_ranking_df["__cabin_key"].tolist()
+    rank_label_map = {}
+    for _, r in visible_ranking_df.iterrows():
+        rank_label_map[r["__cabin_key"]] = (
+            f"Rank {int(r['Rank']):03d} | Cabin {r['display_name']} | "
+            f"Gap {format_number(r['rank_gap'], 0)} kWh | Loss {format_percent(r['rank_loss_pct'])}"
+        )
+
+    col_rank_select, col_rank_open = st.columns([3.1, 0.8])
+    with col_rank_select:
+        ranked_choice_key = st.selectbox(
+            "Choose from visible ranking",
+            options=rank_options,
+            index=rank_options.index(current_key_for_nav) if current_key_for_nav in rank_options else 0,
+            format_func=lambda key: rank_label_map.get(key, key),
+            key=f"ranked_cabin_choice_{province}_{ranking_month}_{top_n_choice}",
+        )
+
+    with col_rank_open:
+        st.write("")
+        st.write("")
+        if st.button("Open ranked", key=f"open_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
+            target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
+            if target_row is not None:
+                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.rerun()
+
+# Final resolution used by the rest of the report.
+cabin_query = st.session_state.get(cabin_search_key, "")
 selected_cabin_key, cabin_message, cabin_matches_df = resolve_cabin_text_input(cabin_options_df, cabin_query)
 
 if selected_cabin_key is None:
