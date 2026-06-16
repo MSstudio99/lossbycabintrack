@@ -1393,78 +1393,96 @@ st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_contain
 st.markdown("### Summary Tables — Same Place, No Separate Tabs")
 
 # Cabin navigation is intentionally placed beside the summary tables, not above the report.
-# The text input remains the main exact-search method; these controls are for browsing while reviewing tables.
-browse_df = cabin_options_df.reset_index(drop=True)
-browse_keys = browse_df["__cabin_key"].tolist()
+# IMPORTANT: The browse list follows the visible ranking table only.
+# Therefore, changing Ranking month or Ranking rows shown changes the cabins browsed here.
+browse_df = visible_ranking_df.reset_index(drop=True).copy()
+browse_keys = browse_df["__cabin_key"].tolist() if not browse_df.empty else []
+rank_label_map = {}
+for _, r in browse_df.iterrows():
+    rank_label_map[r["__cabin_key"]] = (
+        f"Rank {int(r['Rank']):03d} | Cabin {r['display_name']} | "
+        f"Gap {format_number(r['rank_gap'], 0)} kWh | Loss {format_percent(r['rank_loss_pct'])}"
+    )
 
-if selected_cabin_key in browse_keys:
+if browse_keys and selected_cabin_key in browse_keys:
     current_pos = browse_keys.index(selected_cabin_key)
-else:
+elif browse_keys:
     current_pos = 0
+else:
+    current_pos = -1
 
 summary_table_col, summary_control_col = st.columns([3.2, 1.0])
 
 with summary_control_col:
-    st.markdown("#### Browse cabins")
-    st.caption("Use these buttons while checking the three yearly summary tables.")
-    st.metric("Current position", f"{current_pos + 1}/{len(browse_keys)}")
-
-    if st.button("◀ Previous cabin", key=f"summary_previous_cabin_{province}_{cabin_type_filter}", use_container_width=True):
-        target_pos = max(0, current_pos - 1)
-        target_key = browse_keys[target_pos]
-        target_row = get_row_from_meta(meta_2026_indexed, target_key)
-        if target_row is not None:
-            st.session_state[cabin_search_key] = str(target_row["display_name"])
-            st.rerun()
-
-    if st.button("Next cabin ▶", key=f"summary_next_cabin_{province}_{cabin_type_filter}", use_container_width=True):
-        target_pos = min(len(browse_keys) - 1, current_pos + 1)
-        target_key = browse_keys[target_pos]
-        target_row = get_row_from_meta(meta_2026_indexed, target_key)
-        if target_row is not None:
-            st.session_state[cabin_search_key] = str(target_row["display_name"])
-            st.rerun()
-
-    cabin_number_choice = st.number_input(
-        "Cabin position",
-        min_value=1,
-        max_value=max(1, len(browse_keys)),
-        value=min(current_pos + 1, max(1, len(browse_keys))),
-        step=1,
-        help="Browse by the current filtered cabin list.",
-        key=f"summary_cabin_position_{province}_{cabin_type_filter}_{selected_cabin_key}",
+    st.markdown("#### Browse ranked cabins")
+    st.caption(
+        f"Browsing follows the visible ranking list: {ranking_month} {LATEST_YEAR}, "
+        f"rows shown = {top_n_choice}."
     )
 
-    if st.button("Open selected position", key=f"summary_open_cabin_position_{province}_{cabin_type_filter}", use_container_width=True):
-        target_key = browse_keys[int(cabin_number_choice) - 1]
-        target_row = get_row_from_meta(meta_2026_indexed, target_key)
-        if target_row is not None:
-            st.session_state[cabin_search_key] = str(target_row["display_name"])
-            st.rerun()
-
-    if not visible_ranking_df.empty:
-        with st.expander("Open from visible ranking", expanded=False):
-            rank_options = visible_ranking_df["__cabin_key"].tolist()
-            rank_label_map = {}
-            for _, r in visible_ranking_df.iterrows():
-                rank_label_map[r["__cabin_key"]] = (
-                    f"Rank {int(r['Rank']):03d} | Cabin {r['display_name']} | "
-                    f"Gap {format_number(r['rank_gap'], 0)} kWh | Loss {format_percent(r['rank_loss_pct'])}"
-                )
-
-            ranked_choice_key = st.selectbox(
-                "Visible ranking cabin",
-                options=rank_options,
-                index=rank_options.index(selected_cabin_key) if selected_cabin_key in rank_options else 0,
-                format_func=lambda key: rank_label_map.get(key, key),
-                key=f"summary_ranked_cabin_choice_{province}_{ranking_month}_{top_n_choice}_{selected_cabin_key}",
+    if not browse_keys:
+        st.info("No visible ranking cabins to browse. Check the ranking month or selected province.")
+    else:
+        if selected_cabin_key in browse_keys:
+            current_rank_text = f"{current_pos + 1}/{len(browse_keys)}"
+        else:
+            current_rank_text = "Not in visible ranking"
+            st.warning(
+                "The typed cabin is not inside the current visible ranking list. "
+                "Use the controls below to open a ranked cabin."
             )
 
-            if st.button("Open ranked cabin", key=f"summary_open_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
-                target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
-                if target_row is not None:
-                    st.session_state[cabin_search_key] = str(target_row["display_name"])
-                    st.rerun()
+        st.metric("Visible rank position", current_rank_text)
+
+        selected_rank_label = rank_label_map.get(browse_keys[current_pos], browse_keys[current_pos])
+        st.caption(f"Current browse target: {selected_rank_label}")
+
+        if st.button("◀ Previous ranked cabin", key=f"summary_previous_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
+            target_pos = max(0, current_pos - 1)
+            target_key = browse_keys[target_pos]
+            target_row = get_row_from_meta(meta_2026_indexed, target_key)
+            if target_row is not None:
+                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.rerun()
+
+        if st.button("Next ranked cabin ▶", key=f"summary_next_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
+            target_pos = min(len(browse_keys) - 1, current_pos + 1)
+            target_key = browse_keys[target_pos]
+            target_row = get_row_from_meta(meta_2026_indexed, target_key)
+            if target_row is not None:
+                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.rerun()
+
+        ranking_position_choice = st.number_input(
+            "Ranking position",
+            min_value=1,
+            max_value=max(1, len(browse_keys)),
+            value=min(max(current_pos + 1, 1), max(1, len(browse_keys))),
+            step=1,
+            help="This position follows the current visible ranking table, not the full cabin list.",
+            key=f"summary_ranking_position_{province}_{ranking_month}_{top_n_choice}_{selected_cabin_key}",
+        )
+
+        if st.button("Open ranking position", key=f"summary_open_ranking_position_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
+            target_key = browse_keys[int(ranking_position_choice) - 1]
+            target_row = get_row_from_meta(meta_2026_indexed, target_key)
+            if target_row is not None:
+                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.rerun()
+
+        ranked_choice_key = st.selectbox(
+            "Choose visible ranked cabin",
+            options=browse_keys,
+            index=current_pos if current_pos >= 0 else 0,
+            format_func=lambda key: rank_label_map.get(key, key),
+            key=f"summary_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}_{selected_cabin_key}",
+        )
+
+        if st.button("Open chosen ranked cabin", key=f"summary_open_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
+            target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
+            if target_row is not None:
+                st.session_state[cabin_search_key] = str(target_row["display_name"])
+                st.rerun()
 
 with summary_table_col:
     for year in [2026, 2025, 2024]:
