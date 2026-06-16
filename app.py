@@ -1245,6 +1245,14 @@ A4_LANDSCAPE_PX = (3508, 2480)  # A4 at 300 DPI
 A4_PORTRAIT_PX = (2480, 3508)   # A4 at 300 DPI
 
 
+def report_pt_to_px(font_pt: int | float) -> int:
+    """Convert printed point size to pixels for the 300-DPI A4 image report."""
+    try:
+        return int(round(float(font_pt) / 72 * PRINT_DPI))
+    except Exception:
+        return REPORT_MIN_PX
+
+
 def make_loss_curve_png_image_sized(
     loss_by_year: Dict[int, list[float]],
     title: str,
@@ -2384,7 +2392,26 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v3"
+st.markdown("#### Report font size before export")
+report_font_pt = st.slider(
+    "Report value font size (pt)",
+    min_value=16,
+    max_value=40,
+    value=int(REPORT_MIN_PT),
+    step=1,
+    help=(
+        "This controls the printed value size in the exported report. "
+        "Recommended: 24–28 pt for readable reports. "
+        "If you choose 32–40 pt, some dense Page 2 table values may be clipped because everything is forced into one A4 page."
+    ),
+)
+report_font_px = report_pt_to_px(report_font_pt)
+st.caption(
+    f"Selected report value size: **{report_font_pt} pt** ≈ **{report_font_px} px at {PRINT_DPI} DPI**. "
+    "This size is applied when you click Build print-ready report."
+)
+
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|font_{report_font_pt}pt|print_ready_v4"
 
 for state_key in [
     "report_cache_key",
@@ -2398,12 +2425,19 @@ for state_key in [
         st.session_state[state_key] = None
 
 if st.button("Build print-ready report", type="primary"):
+    # Apply user-selected report font size before generating PDF/PNG pages.
+    # The drawing functions read REPORT_MIN_PT / REPORT_MIN_PX when building the report.
+    REPORT_MIN_PT = int(report_font_pt)
+    REPORT_MIN_PX = report_pt_to_px(REPORT_MIN_PT)
+
     st.session_state["report_cache_key"] = None
     st.session_state["report_pdf_bytes"] = None
     st.session_state["report_png_pages_zip_bytes"] = None
     st.session_state["report_package_zip_bytes"] = None
     st.session_state["report_export_warning"] = None
     st.session_state["report_export_error"] = None
+    st.session_state["report_font_pt"] = int(report_font_pt)
+    st.session_state["report_font_px"] = int(report_font_px)
 
     try:
         spinner_text = "Building print-ready report..."
@@ -2482,7 +2516,9 @@ if st.session_state.get("report_export_warning"):
 
 if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_png_pages_zip_bytes"):
     safe_cabin_name = safe_filename(resolved_name)
-    st.success("Print-ready export is ready.")
+    used_pt = st.session_state.get("report_font_pt", REPORT_MIN_PT)
+    used_px = st.session_state.get("report_font_px", REPORT_MIN_PX)
+    st.success(f"Print-ready export is ready. Report value font used: {used_pt} pt ({used_px} px at {PRINT_DPI} DPI).")
 
     if st.session_state.get("report_pdf_bytes"):
         col_pdf, col_png, col_zip = st.columns(3)
