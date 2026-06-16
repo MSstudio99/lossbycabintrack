@@ -1645,6 +1645,254 @@ def make_high_res_all_summary_page(
     )
     return img
 
+
+def _report_row_height(multiplier: float = 1.45, minimum: int = 120, maximum: int = 230) -> int:
+    """Dynamic row height based on selected report font size."""
+    return max(minimum, min(maximum, int(REPORT_MIN_PX * multiplier)))
+
+
+def _summary_display_period_for_report(
+    summary_df: pd.DataFrame,
+    month_cols: list[str],
+    include_acc_avg: bool = False,
+) -> pd.DataFrame:
+    """Readable summary table for a subset of months.
+
+    kWh rows are converted to MWh so the values can be printed large enough.
+    """
+    output_cols = ["Metric", "Unit", *month_cols]
+    if include_acc_avg:
+        output_cols += ["Acc", "Avg"]
+
+    rows = []
+    for _, src_row in summary_df.iterrows():
+        desc = str(src_row.get("Description", "")).strip()
+        if desc == "Sale":
+            metric, unit = "Sale", "MWh"
+            values = [format_mwh_for_report(src_row.get(col, 0)) for col in month_cols]
+            if include_acc_avg:
+                values += [format_mwh_for_report(src_row.get("Accumulate", 0)), format_mwh_for_report(src_row.get("Average", 0))]
+        elif desc == "Total":
+            metric, unit = "Total", "MWh"
+            values = [format_mwh_for_report(src_row.get(col, 0)) for col in month_cols]
+            if include_acc_avg:
+                values += [format_mwh_for_report(src_row.get("Accumulate", 0)), format_mwh_for_report(src_row.get("Average", 0))]
+        elif desc == "total - sale":
+            metric, unit = "Gap", "MWh"
+            values = [format_mwh_for_report(src_row.get(col, 0)) for col in month_cols]
+            if include_acc_avg:
+                values += [format_mwh_for_report(src_row.get("Accumulate", 0)), format_mwh_for_report(src_row.get("Average", 0))]
+        elif desc == "losses":
+            metric, unit = "Loss %", "%"
+            values = [format_percent(src_row.get(col, 0)) for col in month_cols]
+            if include_acc_avg:
+                values += [format_percent(src_row.get("Accumulate", 0)), format_percent(src_row.get("Average", 0))]
+        else:
+            metric, unit = desc, str(src_row.get("Unit", ""))
+            values = [str(src_row.get(col, "-")) for col in month_cols]
+            if include_acc_avg:
+                values += [str(src_row.get("Accumulate", "-")), str(src_row.get("Average", "-"))]
+
+        rows.append([metric, unit, *values])
+
+    return pd.DataFrame(rows, columns=output_cols).astype(str)
+
+
+def _loss_comparison_period_for_report(
+    loss_df: pd.DataFrame,
+    month_cols: list[str],
+    include_weighted_avg: bool = False,
+) -> pd.DataFrame:
+    """Readable monthly loss table split by period."""
+    rows = []
+    for year in ALL_YEARS:
+        row = {"Year": str(year)}
+        for month in month_cols:
+            try:
+                value = loss_df.loc[loss_df["Month"] == month, str(year)].iloc[0]
+                row[month] = "-" if pd.isna(value) else format_percent(value)
+            except Exception:
+                row[month] = "-"
+
+        if include_weighted_avg:
+            try:
+                weighted = loss_df.loc[loss_df["Month"] == "Weighted yearly loss", str(year)].iloc[0]
+                row["Weighted"] = "-" if pd.isna(weighted) else format_percent(weighted)
+            except Exception:
+                row["Weighted"] = "-"
+            try:
+                avg = loss_df.loc[loss_df["Month"] == "Average monthly loss", str(year)].iloc[0]
+                row["Avg"] = "-" if pd.isna(avg) else format_percent(avg)
+            except Exception:
+                row["Avg"] = "-"
+
+        rows.append(row)
+
+    cols = ["Year", *month_cols]
+    if include_weighted_avg:
+        cols += ["Weighted", "Avg"]
+    return pd.DataFrame(rows, columns=cols).astype(str)
+
+
+def make_high_res_monthly_loss_page(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    loss_compare_df: pd.DataFrame,
+) -> Image.Image:
+    """Create a dedicated monthly loss comparison page.
+
+    Splitting the monthly comparison into H1 and H2 allows large, readable text.
+    """
+    width, height = A4_LANDSCAPE_PX
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    margin_x = 70
+    y = 54
+    title_font = get_pil_font(66, bold=True)
+    subtitle_font = get_pil_font(34)
+    section_font = get_pil_font(50, bold=True)
+    header_font = get_pil_font(max(48, int(REPORT_MIN_PX * 0.62)), bold=True)
+    cell_font = get_pil_font(max(REPORT_MIN_PX, 118))
+
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+    draw.text((margin_x, y), "Monthly Loss % Comparison", font=title_font, fill="#0f172a")
+    y += 82
+    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#334155")
+    y += 88
+
+    table_width = width - margin_x * 2
+    row_h = _report_row_height(multiplier=1.45, minimum=145, maximum=235)
+
+    h1_cols = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+    h2_cols = ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    draw.text((margin_x, y), "January to June", font=section_font, fill="#0f172a")
+    y += 62
+    y = draw_table_on_image(
+        draw,
+        _loss_comparison_period_for_report(loss_compare_df, h1_cols, include_weighted_avg=False),
+        margin_x,
+        y,
+        table_width,
+        row_h,
+        header_font,
+        cell_font,
+        col_weights=[0.85] + [1.0] * 6,
+        min_value_font_size=REPORT_MIN_PX,
+        min_header_font_size=max(34, int(REPORT_MIN_PX * 0.45)),
+    )
+    y += 86
+
+    draw.text((margin_x, y), "July to December + yearly result", font=section_font, fill="#0f172a")
+    y += 62
+    y = draw_table_on_image(
+        draw,
+        _loss_comparison_period_for_report(loss_compare_df, h2_cols, include_weighted_avg=True),
+        margin_x,
+        y,
+        table_width,
+        row_h,
+        header_font,
+        cell_font,
+        col_weights=[0.80] + [1.0] * 6 + [1.35, 1.0],
+        min_value_font_size=REPORT_MIN_PX,
+        min_header_font_size=max(34, int(REPORT_MIN_PX * 0.45)),
+    )
+
+    draw.text(
+        (margin_x, height - 54),
+        "Note: Loss % = (1 - Sale / Total) × 100.",
+        font=get_pil_font(28),
+        fill="#64748b",
+    )
+    return img
+
+
+def make_high_res_summary_year_page(
+    year: int,
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    summary_df: Optional[pd.DataFrame],
+) -> Image.Image:
+    """Create one readable summary page for one year.
+
+    Each year is split into H1 and H2 tables so the report values can be large.
+    """
+    width, height = A4_LANDSCAPE_PX
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    margin_x = 70
+    y = 50
+    title_font = get_pil_font(66, bold=True)
+    subtitle_font = get_pil_font(34)
+    section_font = get_pil_font(50, bold=True)
+    header_font = get_pil_font(max(46, int(REPORT_MIN_PX * 0.58)), bold=True)
+    cell_font = get_pil_font(max(REPORT_MIN_PX, 116))
+
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+    draw.text((margin_x, y), f"Summary Table ({year})", font=title_font, fill="#0f172a")
+    y += 82
+    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#334155")
+    y += 72
+
+    if summary_df is None:
+        draw.text((margin_x, y), f"No {year} data available for this cabin.", font=get_pil_font(54), fill="#64748b")
+        return img
+
+    table_width = width - margin_x * 2
+    row_h = _report_row_height(multiplier=1.35, minimum=145, maximum=220)
+
+    h1_cols = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+    h2_cols = ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    draw.text((margin_x, y), "January to June", font=section_font, fill="#0f172a")
+    y += 60
+    y = draw_table_on_image(
+        draw,
+        _summary_display_period_for_report(summary_df, h1_cols, include_acc_avg=False),
+        margin_x,
+        y,
+        table_width,
+        row_h,
+        header_font,
+        cell_font,
+        col_weights=[1.10, 0.70] + [1.0] * 6,
+        min_value_font_size=REPORT_MIN_PX,
+        min_header_font_size=max(32, int(REPORT_MIN_PX * 0.42)),
+    )
+    y += 78
+
+    draw.text((margin_x, y), "July to December + yearly result", font=section_font, fill="#0f172a")
+    y += 60
+    y = draw_table_on_image(
+        draw,
+        _summary_display_period_for_report(summary_df, h2_cols, include_acc_avg=True),
+        margin_x,
+        y,
+        table_width,
+        row_h,
+        header_font,
+        cell_font,
+        col_weights=[1.10, 0.70] + [1.0] * 6 + [1.20, 1.05],
+        min_value_font_size=REPORT_MIN_PX,
+        min_header_font_size=max(32, int(REPORT_MIN_PX * 0.42)),
+    )
+
+    draw.text(
+        (margin_x, height - 54),
+        "Note: Report table values are shown in MWh for readability. Exact kWh values remain in CSV downloads.",
+        font=get_pil_font(28),
+        fill="#64748b",
+    )
+    return img
+
+
 def build_high_res_png_pages_zip_bytes(
     province: str,
     cabin_name: str,
@@ -1655,23 +1903,46 @@ def build_high_res_png_pages_zip_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build a ZIP containing two A4 landscape 300 DPI PNG pages."""
+    """Build a ZIP containing readable A4 landscape 300 DPI PNG pages.
+
+    Readable layout:
+    Page 1: dashboard KPI + chart
+    Page 2: monthly loss comparison
+    Page 3-5: one yearly summary table per page
+    """
     safe_cabin = safe_filename(cabin_name)
     pages: list[tuple[str, Image.Image]] = []
+
     pages.append((
         safe_filename(f"01_{province}_Cabin_{safe_cabin}_Dashboard_A4_Landscape_300DPI.png"),
         make_high_res_overview_page(province, cabin_name, cabin_type, ranking_month, yearly_kpi_df, loss_by_year, loss_compare_df),
     ))
     pages.append((
-        safe_filename(f"02_{province}_Cabin_{safe_cabin}_All_Summary_Tables_A4_Landscape_300DPI.png"),
-        make_high_res_all_summary_page(province, cabin_name, cabin_type, ranking_month, summary_by_year, loss_compare_df),
+        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Landscape_300DPI.png"),
+        make_high_res_monthly_loss_page(province, cabin_name, cabin_type, ranking_month, loss_compare_df),
     ))
+
+    page_no = 3
+    for year in [2026, 2025, 2024]:
+        pages.append((
+            safe_filename(f"{page_no:02d}_{province}_Cabin_{safe_cabin}_Summary_{year}_A4_Landscape_300DPI.png"),
+            make_high_res_summary_year_page(
+                year=year,
+                province=province,
+                cabin_name=cabin_name,
+                cabin_type=cabin_type,
+                ranking_month=ranking_month,
+                summary_df=summary_by_year.get(year),
+            ),
+        ))
+        page_no += 1
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         for filename, page_img in pages:
             zipf.writestr(filename, image_to_png_bytes(page_img, dpi=PRINT_DPI))
     return zip_buffer.getvalue()
+
 
 def _pdf_cell_text(value) -> str:
     """Safe short text for ReportLab tables."""
@@ -1886,13 +2157,11 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build a two-page A4 landscape PDF using direct ReportLab canvas drawing.
+    """Build a readable multi-page A4 landscape PDF.
 
-    Why canvas instead of SimpleDocTemplate:
-    SimpleDocTemplate creates an internal frame that is slightly smaller than
-    the physical A4 page. A full-page image can therefore fail with:
-    "Flowable Image too large on page". Direct canvas drawing avoids that
-    frame limit and fits the A4 report images exactly.
+    The earlier two-page PDF was not readable because Page 2 forced:
+    Monthly Loss % + three 14-column yearly summary tables into one A4 page.
+    This version uses more pages so the selected font size can actually be seen.
     """
     try:
         from reportlab.lib.pagesizes import A4, landscape
@@ -1904,23 +2173,36 @@ def make_printable_selected_report_pdf_bytes(
     page_size = landscape(A4)
     page_w, page_h = page_size
 
-    overview_img = make_high_res_overview_page(
-        province=province,
-        cabin_name=cabin_name,
-        cabin_type=cabin_type,
-        ranking_month=ranking_month,
-        yearly_kpi_df=yearly_kpi_df,
-        loss_by_year=loss_by_year,
-        loss_compare_df=loss_compare_df,
-    )
-    summary_img = make_high_res_all_summary_page(
-        province=province,
-        cabin_name=cabin_name,
-        cabin_type=cabin_type,
-        ranking_month=ranking_month,
-        summary_by_year=summary_by_year,
-        loss_compare_df=loss_compare_df,
-    )
+    pages: list[Image.Image] = [
+        make_high_res_overview_page(
+            province=province,
+            cabin_name=cabin_name,
+            cabin_type=cabin_type,
+            ranking_month=ranking_month,
+            yearly_kpi_df=yearly_kpi_df,
+            loss_by_year=loss_by_year,
+            loss_compare_df=loss_compare_df,
+        ),
+        make_high_res_monthly_loss_page(
+            province=province,
+            cabin_name=cabin_name,
+            cabin_type=cabin_type,
+            ranking_month=ranking_month,
+            loss_compare_df=loss_compare_df,
+        ),
+    ]
+
+    for year in [2026, 2025, 2024]:
+        pages.append(
+            make_high_res_summary_year_page(
+                year=year,
+                province=province,
+                cabin_name=cabin_name,
+                cabin_type=cabin_type,
+                ranking_month=ranking_month,
+                summary_df=summary_by_year.get(year),
+            )
+        )
 
     def _draw_full_page_image(pdf_canvas, pil_img: Image.Image):
         img_buffer = io.BytesIO()
@@ -1939,14 +2221,13 @@ def make_printable_selected_report_pdf_bytes(
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=page_size)
 
-    _draw_full_page_image(pdf, overview_img)
-    pdf.showPage()
-
-    _draw_full_page_image(pdf, summary_img)
-    pdf.showPage()
+    for page_img in pages:
+        _draw_full_page_image(pdf, page_img)
+        pdf.showPage()
 
     pdf.save()
     return buffer.getvalue()
+
 
 def build_selected_pdf_report_package_zip_bytes(
     province: str,
@@ -2380,8 +2661,8 @@ st.divider()
 # ---------------------------------------------------------
 st.subheader("Print-Ready Export — Selected Cabin Only")
 st.caption(
-    "For printing, PDF is best when reportlab is installed. "
-    "The app always creates A4 300 DPI PNG pages, so export still works even if PDF support is missing."
+    "For printing, the readable PDF now uses multiple A4 landscape pages instead of forcing all tables into two pages. "
+    "This keeps the values readable. The app also creates A4 300 DPI PNG pages, so export still works even if PDF support is missing."
 )
 
 pdf_supported = is_reportlab_available()
@@ -2411,7 +2692,7 @@ st.caption(
     "This size is applied when you click Build print-ready report."
 )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|font_{report_font_pt}pt|print_ready_v4"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|font_{report_font_pt}pt|readable_multi_page_v5"
 
 for state_key in [
     "report_cache_key",
@@ -2518,7 +2799,7 @@ if st.session_state.get("report_cache_key") == report_key and st.session_state.g
     safe_cabin_name = safe_filename(resolved_name)
     used_pt = st.session_state.get("report_font_pt", REPORT_MIN_PT)
     used_px = st.session_state.get("report_font_px", REPORT_MIN_PX)
-    st.success(f"Print-ready export is ready. Report value font used: {used_pt} pt ({used_px} px at {PRINT_DPI} DPI).")
+    st.success(f"Readable multi-page print-ready export is ready. Report value font used: {used_pt} pt ({used_px} px at {PRINT_DPI} DPI).")
 
     if st.session_state.get("report_pdf_bytes"):
         col_pdf, col_png, col_zip = st.columns(3)
