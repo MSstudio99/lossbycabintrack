@@ -1486,26 +1486,88 @@ def build_high_res_png_pages_zip_bytes(
     return zip_buffer.getvalue()
 
 
-def _reportlab_table(display_df: pd.DataFrame, col_widths: Optional[list[float]] = None):
+
+def _pdf_cell_text(value) -> str:
+    """Safe short text for ReportLab tables."""
+    if value is None:
+        return "-"
+    text = str(value)
+    return text.replace("\n", " ").strip()
+
+
+def _reportlab_table(
+    display_df: pd.DataFrame,
+    col_widths: Optional[list[float]] = None,
+    font_size: float = 8.8,
+    header_font_size: float = 9.2,
+    numeric_start_col: int = 1,
+):
+    """Create a readable ReportLab table for A4 landscape pages.
+
+    The old PDF tried to fit the full 17-column yearly summary table on one
+    page, forcing very small text. This helper is used with split tables so
+    the font can stay readable on A4.
+    """
     from reportlab.lib import colors
     from reportlab.platypus import Table, TableStyle
 
-    data = [display_df.columns.astype(str).tolist()] + display_df.astype(str).values.tolist()
-    table = Table(data, colWidths=col_widths, repeatRows=1)
-    style = TableStyle([
+    clean_df = display_df.copy().astype(str)
+    data = [clean_df.columns.astype(str).tolist()] + clean_df.values.tolist()
+    data = [[_pdf_cell_text(cell) for cell in row] for row in data]
+
+    table = Table(data, colWidths=col_widths, repeatRows=1, hAlign="LEFT")
+    style_items = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 6.5),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, 0), header_font_size),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), font_size),
+        ("LEADING", (0, 0), (-1, -1), font_size + 2.2),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+        ("ALIGN", (1, 1), (1, -1), "LEFT"),
+        ("ALIGN", (numeric_start_col, 1), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
-        ("FONTSIZE", (0, 1), (-1, -1), 6.2),
-        ("LEADING", (0, 0), (-1, -1), 7.2),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-    ])
-    table.setStyle(style)
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+
+    # Light semantic row colors for summary tables.
+    for row_idx, row in enumerate(data[1:], start=1):
+        desc = str(row[1]).lower() if len(row) > 1 else ""
+        if desc == "sale":
+            bg, fg = "#ecfdf5", "#065f46"
+        elif desc == "total":
+            bg, fg = "#eff6ff", "#1d4ed8"
+        elif desc == "total - sale":
+            bg, fg = "#fff7ed", "#c2410c"
+        elif desc == "losses":
+            bg, fg = "#fef2f2", "#b91c1c"
+        elif str(row[0]).lower().startswith("weighted") or str(row[0]).lower().startswith("average"):
+            bg, fg = "#f8fafc", "#0f172a"
+            style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
+        else:
+            bg, fg = None, None
+
+        if bg:
+            style_items.append(("BACKGROUND", (0, row_idx), (-1, row_idx), colors.HexColor(bg)))
+        if fg:
+            style_items.append(("TEXTCOLOR", (0, row_idx), (-1, row_idx), colors.HexColor(fg)))
+
+    table.setStyle(TableStyle(style_items))
     return table
+
+
+def _summary_display_halves_for_pdf(summary_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split the wide 12-month summary table into readable A4 sections."""
+    display = format_summary_for_display(summary_df)
+    first_cols = ["No", "Description", "Unit", "Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+    second_cols = ["No", "Description", "Unit", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Accumulate", "Average"]
+    return display[first_cols].copy(), display[second_cols].copy()
 
 
 def _pdf_footer(canvas, doc):
@@ -1513,7 +1575,7 @@ def _pdf_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(HexColor("#64748b"))
-    canvas.drawString(doc.leftMargin, 18, "EDC Cabin Loss Dashboard — print-ready selected cabin report")
+    canvas.drawString(doc.leftMargin, 18, "EDC Cabin Loss Dashboard - A4 landscape selected cabin report")
     canvas.drawRightString(doc.pagesize[0] - doc.rightMargin, 18, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -1528,7 +1590,12 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build a sharp PDF report. Text and tables are vector-based, not blurry raster text."""
+    """Build an A4 landscape PDF with readable tables.
+
+    Key design change:
+    - The wide yearly summary table is split into Jan-Jun and Jul-Dec + Accumulate/Average.
+    - This avoids tiny fonts and makes the report readable when printed on A4.
+    """
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
@@ -1538,78 +1605,129 @@ def make_printable_selected_report_pdf_bytes(
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
+    page_size = landscape(A4)
+    page_w, page_h = page_size
+    margin_l = 28
+    margin_r = 28
+    usable_w = page_w - margin_l - margin_r
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=landscape(A4),
-        leftMargin=24,
-        rightMargin=24,
-        topMargin=28,
-        bottomMargin=30,
+        pagesize=page_size,
+        leftMargin=margin_l,
+        rightMargin=margin_r,
+        topMargin=30,
+        bottomMargin=34,
     )
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "ReportTitle",
+        "ReportTitleA4",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
+        fontSize=22,
+        leading=26,
         textColor=colors.HexColor("#0f172a"),
+        spaceAfter=8,
+        alignment=0,
+    )
+    h1_style = ParagraphStyle(
+        "ReportH1A4",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        leading=20,
+        textColor=colors.HexColor("#0f172a"),
+        spaceBefore=4,
         spaceAfter=8,
     )
     h2_style = ParagraphStyle(
-        "ReportH2",
+        "ReportH2A4",
         parent=styles["Heading2"],
         fontName="Helvetica-Bold",
-        fontSize=12,
+        fontSize=12.5,
         leading=15,
         textColor=colors.HexColor("#0f172a"),
-        spaceBefore=4,
+        spaceBefore=6,
         spaceAfter=6,
     )
     small_style = ParagraphStyle(
-        "Small",
+        "SmallA4",
         parent=styles["BodyText"],
-        fontSize=8.5,
-        leading=11,
+        fontSize=9.5,
+        leading=12,
         textColor=colors.HexColor("#475569"),
     )
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     story = []
+
+    # Page 1 - overview and chart.
     story.append(Paragraph("EDC Cabin Loss Printable Report", title_style))
+    story.append(Paragraph("A4 landscape format - selected cabin report", small_style))
     story.append(Paragraph(subtitle, small_style))
-    story.append(Paragraph("PDF is the recommended print format because text and tables remain sharp when printed.", small_style))
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("Yearly KPI Comparison", h2_style))
     story.append(_reportlab_table(
         format_yearly_kpi_table(yearly_kpi_df),
-        col_widths=[0.55 * inch, 1.05 * inch, 1.05 * inch, 1.05 * inch, 1.05 * inch, 1.15 * inch],
+        col_widths=[0.72 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.55 * inch],
+        font_size=9.4,
+        header_font_size=9.8,
+        numeric_start_col=1,
     ))
     story.append(Spacer(1, 12))
 
     story.append(Paragraph("Loss % Trend by Month", h2_style))
     chart_png = image_to_png_bytes(
-        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=2200, height=700),
+        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=2600, height=780),
         dpi=PRINT_DPI,
     )
-    story.append(RLImage(io.BytesIO(chart_png), width=7.55 * inch, height=2.4 * inch))
+    story.append(RLImage(io.BytesIO(chart_png), width=min(usable_w, 10.4 * inch), height=3.1 * inch))
 
+    # Page 2 - monthly comparison.
     story.append(PageBreak())
-    story.append(Paragraph("Monthly Loss % Comparison", h2_style))
+    story.append(Paragraph("Monthly Loss % Comparison", h1_style))
+    story.append(Paragraph(subtitle, small_style))
+    story.append(Spacer(1, 10))
     story.append(_reportlab_table(
         format_loss_comparison_table(loss_compare_df),
-        col_widths=[1.65 * inch, 1.0 * inch, 1.0 * inch, 1.0 * inch],
+        col_widths=[2.25 * inch, 1.55 * inch, 1.55 * inch, 1.55 * inch],
+        font_size=10.2,
+        header_font_size=10.6,
+        numeric_start_col=1,
     ))
 
-    summary_col_widths = [0.27 * inch, 0.78 * inch, 0.35 * inch] + [0.39 * inch] * 12 + [0.65 * inch, 0.55 * inch]
+    # Pages 3+ - yearly summaries, each year split into two readable sections.
+    summary_first_widths = [0.42 * inch, 1.35 * inch, 0.55 * inch] + [0.9 * inch] * 6
+    summary_second_widths = [0.42 * inch, 1.35 * inch, 0.55 * inch] + [0.78 * inch] * 6 + [1.0 * inch, 0.9 * inch]
+
     for year in [2026, 2025, 2024]:
         story.append(PageBreak())
-        story.append(Paragraph(f"Summary Table ({year})", h2_style))
+        story.append(Paragraph(f"Summary Table ({year})", h1_style))
+        story.append(Paragraph(subtitle, small_style))
+        story.append(Spacer(1, 8))
+
         if year in summary_by_year:
-            story.append(_reportlab_table(format_summary_for_display(summary_by_year[year]), col_widths=summary_col_widths))
+            first_half, second_half = _summary_display_halves_for_pdf(summary_by_year[year])
+            story.append(Paragraph("January to June", h2_style))
+            story.append(_reportlab_table(
+                first_half,
+                col_widths=summary_first_widths,
+                font_size=9.2,
+                header_font_size=9.5,
+                numeric_start_col=3,
+            ))
+            story.append(Spacer(1, 14))
+            story.append(Paragraph("July to December, Accumulate and Average", h2_style))
+            story.append(_reportlab_table(
+                second_half,
+                col_widths=summary_second_widths,
+                font_size=8.7,
+                header_font_size=9.0,
+                numeric_start_col=3,
+            ))
         else:
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
 
