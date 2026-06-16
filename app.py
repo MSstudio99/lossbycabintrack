@@ -1462,7 +1462,7 @@ def make_high_res_all_summary_tables_one_page(
 
     # Three yearly summary tables must share one A4 page with KPI.
     # Keep values readable while fitting all required tables.
-    summary_row_h = 92
+    summary_row_h = 88
 
     for year in [2026, 2025, 2024]:
         draw.text((margin_x, y), f"Summary Table ({year}) - Full Year", font=section_font, fill="#0f172a")
@@ -1484,7 +1484,7 @@ def make_high_res_all_summary_tables_one_page(
             draw.text((margin_x, y), f"No {year} data available for this cabin.", font=cell_font, fill="#64748b")
             y += summary_row_h
 
-        y += 22
+        y += 18
 
     # Add Yearly KPI table under the three summaries.
     draw.text((margin_x, y), "Yearly KPI Comparison", font=section_font, fill="#0f172a")
@@ -1496,14 +1496,14 @@ def make_high_res_all_summary_tables_one_page(
         margin_x,
         y,
         table_width,
-        76,
+        72,
         get_pil_font(24, bold=True),
         get_pil_font(23),
         col_weights=[0.85, 1.45, 1.45, 1.45, 1.35, 1.55],
     )
 
     draw.text(
-        (margin_x, height - 32),
+        (margin_x, height - 34),
         "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
         font=get_pil_font(20),
         fill="#64748b",
@@ -1527,12 +1527,7 @@ def build_high_res_png_pages_zip_bytes(
 
     pages: list[tuple[str, Image.Image]] = []
     pages.append((
-        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Overview_A4_Landscape_300DPI.png"),
-        make_high_res_overview_page(province, cabin_name, cabin_type, ranking_month, yearly_kpi_df, loss_by_year),
-    ))
-
-    pages.append((
-        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Landscape_300DPI.png"),
+        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Landscape_300DPI.png"),
         make_high_res_table_page(
             format_loss_comparison_table(loss_compare_df),
             title="Monthly Loss % Comparison",
@@ -1543,7 +1538,7 @@ def build_high_res_png_pages_zip_bytes(
     ))
 
     pages.append((
-        safe_filename(f"03_{province}_Cabin_{safe_cabin}_Summary_2026_2025_2024_A4_Landscape_300DPI.png"),
+        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Summary_2026_2025_2024_A4_Landscape_300DPI.png"),
         make_high_res_all_summary_tables_one_page(
             province=province,
             cabin_name=cabin_name,
@@ -1746,26 +1741,10 @@ def make_printable_selected_report_pdf_bytes(
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     story = []
 
-    # Page 1 - overview and KPI table.
-    story.append(Paragraph("EDC Cabin Loss Printable Report", title_style))
-    story.append(Paragraph("A4 landscape format - selected cabin report", small_style))
-    story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("Yearly KPI Comparison", h2_style))
-    story.append(_reportlab_table(
-        format_yearly_kpi_table(yearly_kpi_df),
-        col_widths=[0.68 * inch, 1.28 * inch, 1.28 * inch, 1.28 * inch, 1.25 * inch, 1.42 * inch],
-        font_size=9.2,
-        header_font_size=9.6,
-        numeric_start_col=1,
-    ))
-
-    # Page 2 - monthly comparison.
-    story.append(PageBreak())
+    # Page 1 - monthly comparison. The old KPI-only first page was removed.
     story.append(Paragraph("Monthly Loss % Comparison", h1_style))
     story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
     story.append(_reportlab_table(
         format_loss_comparison_table(loss_compare_df),
         col_widths=[2.25 * inch, 1.55 * inch, 1.55 * inch, 1.55 * inch],
@@ -1774,11 +1753,11 @@ def make_printable_selected_report_pdf_bytes(
         numeric_start_col=1,
     ))
 
-    # Page 3 - all yearly summaries together on one landscape page, with KPI below.
+    # Page 2 - all yearly summaries together on one landscape page, with KPI and note below.
     story.append(PageBreak())
     story.append(Paragraph("Summary Tables — 2026, 2025, 2024", h1_style))
     story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 5))
+    story.append(Spacer(1, 3))
 
     summary_widths = [0.78 * inch, 0.42 * inch] + [0.48 * inch] * 12 + [0.68 * inch, 0.58 * inch]
 
@@ -1788,23 +1767,23 @@ def make_printable_selected_report_pdf_bytes(
             story.append(_reportlab_table(
                 _summary_display_full_for_report(summary_by_year[year]),
                 col_widths=summary_widths,
-                font_size=6.8,
-                header_font_size=7.1,
+                font_size=6.6,
+                header_font_size=6.9,
                 numeric_start_col=2,
             ))
         else:
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 2))
 
     story.append(Paragraph("Yearly KPI Comparison", h2_style))
     story.append(_reportlab_table(
         format_yearly_kpi_table(yearly_kpi_df),
         col_widths=[0.72 * inch, 1.34 * inch, 1.34 * inch, 1.34 * inch, 1.30 * inch, 1.48 * inch],
-        font_size=8.3,
-        header_font_size=8.7,
+        font_size=7.8,
+        header_font_size=8.2,
         numeric_start_col=1,
     ))
-    story.append(Spacer(1, 5))
+    story.append(Spacer(1, 2))
 
     story.append(Paragraph(
         "Note: Gap = Total - Sale. Loss % is calculated as (1 - Sale / Total) × 100.",
@@ -2258,7 +2237,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v10_summary_plus_kpi_one_page"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v11_no_kpi_first_page_note_same_page"
 
 for state_key in [
     "report_cache_key",
