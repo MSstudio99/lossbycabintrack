@@ -773,6 +773,25 @@ def image_to_png_bytes(img: Image.Image, dpi: int = 300) -> bytes:
     return buf.getvalue()
 
 
+def build_loss_trend_plot_png_bytes(
+    province: str,
+    cabin_name: str,
+    cabin_type: str,
+    ranking_month: str,
+    loss_by_year: Dict[int, list[float]],
+) -> bytes:
+    """Build a standalone printable Loss % Trend by Month PNG."""
+    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+    chart_img = make_loss_curve_png_image_sized(
+        loss_by_year=loss_by_year,
+        title="Loss % Trend by Month",
+        subtitle=subtitle,
+        width=3200,
+        height=1500,
+    )
+    return image_to_png_bytes(chart_img, dpi=PRINT_DPI)
+
+
 def make_combined_summary_png_bytes(
     province: str,
     ranking_month: str,
@@ -1628,16 +1647,16 @@ def make_printable_selected_report_pdf_bytes(
 ) -> bytes:
     """Build an A4 landscape PDF with readable tables.
 
-    Key design change:
+    Key design changes:
+    - The Loss % Trend chart is exported separately as its own PNG.
     - The wide yearly summary table is split into Jan-Jun and Jul-Dec + Accumulate/Average.
-    - This avoids tiny fonts and makes the report readable when printed on A4.
+    - This avoids tiny fonts and keeps the PDF report focused on readable tables.
     """
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
@@ -1716,28 +1735,11 @@ def make_printable_selected_report_pdf_bytes(
     story.append(Spacer(1, 12))
 
     story.append(Paragraph("Loss % Trend by Month", h2_style))
-
-    # Build a tall, high-resolution chart, then place it without flattening.
-    chart_img = make_loss_curve_png_image_sized(
-        loss_by_year,
-        "Loss % Trend by Month",
-        subtitle,
-        width=3200,
-        height=1450,
-    )
-    chart_png = image_to_png_bytes(chart_img, dpi=PRINT_DPI)
-
-    # Keep aspect ratio like the sample plot. Do not force a short 3.1-inch height.
-    chart_w = min(usable_w, 10.6 * inch)
-    chart_h = chart_w * chart_img.height / chart_img.width
-
-    # A4 landscape page still needs room for the KPI table above.
-    max_chart_h = 4.45 * inch
-    if chart_h > max_chart_h:
-        chart_h = max_chart_h
-        chart_w = chart_h * chart_img.width / chart_img.height
-
-    story.append(RLImage(io.BytesIO(chart_png), width=chart_w, height=chart_h))
+    story.append(Paragraph(
+        "This plot is exported separately as a standalone high-resolution PNG so it can remain large and readable. "
+        "Use the dedicated download button in the app.",
+        small_style,
+    ))
 
     # Page 2 - monthly comparison.
     story.append(PageBreak())
@@ -2220,8 +2222,8 @@ st.divider()
 # ---------------------------------------------------------
 st.subheader("Print-Ready Export — Selected Cabin Only")
 st.caption(
-    "For printing, PDF is best when reportlab is installed. "
-    "The app always creates A4 300 DPI PNG pages, so export still works even if PDF support is missing."
+    "The Loss % Trend by Month chart is exported separately as its own PNG so it stays large and readable, similar to your sample style. "
+    "The PDF report focuses on readable tables, and the app still creates A4 300 DPI PNG pages."
 )
 
 pdf_supported = is_reportlab_available()
@@ -2232,13 +2234,14 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v3"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v4_separate_plot"
 
 for state_key in [
     "report_cache_key",
     "report_pdf_bytes",
     "report_png_pages_zip_bytes",
     "report_package_zip_bytes",
+    "report_loss_plot_png_bytes",
     "report_export_warning",
     "report_export_error",
 ]:
@@ -2250,6 +2253,7 @@ if st.button("Build print-ready report", type="primary"):
     st.session_state["report_pdf_bytes"] = None
     st.session_state["report_png_pages_zip_bytes"] = None
     st.session_state["report_package_zip_bytes"] = None
+    st.session_state["report_loss_plot_png_bytes"] = None
     st.session_state["report_export_warning"] = None
     st.session_state["report_export_error"] = None
 
@@ -2298,6 +2302,14 @@ if st.button("Build print-ready report", type="primary"):
                     "Use the A4 PNG pages ZIP, or add reportlab to requirements.txt and redeploy."
                 )
 
+            loss_plot_png = build_loss_trend_plot_png_bytes(
+                province=province,
+                cabin_name=resolved_name,
+                cabin_type=str(selected_row["type"]),
+                ranking_month=ranking_month,
+                loss_by_year=loss_by_year,
+            )
+
             report_package_zip = build_selected_print_report_package_zip_bytes(
                 province=province,
                 cabin_name=resolved_name,
@@ -2314,6 +2326,7 @@ if st.button("Build print-ready report", type="primary"):
             st.session_state["report_pdf_bytes"] = report_pdf
             st.session_state["report_png_pages_zip_bytes"] = png_pages_zip
             st.session_state["report_package_zip_bytes"] = report_package_zip
+            st.session_state["report_loss_plot_png_bytes"] = loss_plot_png
 
     except Exception as exc:
         st.session_state["report_export_error"] = (
@@ -2332,14 +2345,31 @@ if st.session_state.get("report_cache_key") == report_key and st.session_state.g
     safe_cabin_name = safe_filename(resolved_name)
     st.success("Print-ready export is ready.")
 
+    st.markdown("#### Separate Loss % Trend plot")
+    st.caption("This chart is exported separately from the PDF so it can stay large and readable.")
+    if st.session_state.get("report_loss_plot_png_bytes"):
+        st.image(
+            st.session_state["report_loss_plot_png_bytes"],
+            caption="Loss % Trend by Month — standalone printable PNG",
+            use_container_width=True,
+        )
+
     if st.session_state.get("report_pdf_bytes"):
-        col_pdf, col_png, col_zip = st.columns(3)
+        col_pdf, col_plot, col_png, col_zip = st.columns(4)
         with col_pdf:
             st.download_button(
                 "Download PDF report",
                 data=st.session_state["report_pdf_bytes"],
                 file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
                 mime="application/pdf",
+                use_container_width=True,
+            )
+        with col_plot:
+            st.download_button(
+                "Download Loss Trend PNG",
+                data=st.session_state["report_loss_plot_png_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_loss_trend_plot.png"),
+                mime="image/png",
                 use_container_width=True,
             )
         with col_png:
@@ -2359,7 +2389,15 @@ if st.session_state.get("report_cache_key") == report_key and st.session_state.g
                 use_container_width=True,
             )
     else:
-        col_png, col_zip = st.columns(2)
+        col_plot, col_png, col_zip = st.columns(3)
+        with col_plot:
+            st.download_button(
+                "Download Loss Trend PNG",
+                data=st.session_state["report_loss_plot_png_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_loss_trend_plot.png"),
+                mime="image/png",
+                use_container_width=True,
+            )
         with col_png:
             st.download_button(
                 "Download A4 PNG pages ZIP",
