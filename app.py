@@ -1235,8 +1235,11 @@ def build_selected_report_zip_bytes(
 # PRINT-READY PDF + HIGH-RESOLUTION PNG EXPORT HELPERS
 # =========================================================
 PRINT_DPI = 300
-REPORT_MIN_PT = 16
-REPORT_MIN_PX = int(round(REPORT_MIN_PT / 72 * PRINT_DPI))  # 16 pt at 300 DPI ~= 67 px
+
+# Readable report font size
+REPORT_MIN_PT = 22
+REPORT_MIN_PX = int(round(REPORT_MIN_PT / 72 * PRINT_DPI))  # 22 pt at 300 DPI ≈ 92 px
+
 A4_LANDSCAPE_PX = (3508, 2480)  # A4 at 300 DPI
 A4_PORTRAIT_PX = (2480, 3508)   # A4 at 300 DPI
 
