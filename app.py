@@ -1295,7 +1295,7 @@ else:
 st.divider()
 
 # ---------------------------------------------------------
-# Cabin selector + quick cabin controls
+# Cabin selector
 # ---------------------------------------------------------
 if cabin_type_filter == "All":
     cabin_options_df = cabin_meta_2026.copy()
@@ -1318,8 +1318,7 @@ if cabin_search_key not in st.session_state:
 
 st.markdown("### Open cabin summary")
 st.caption(
-    "Use the typed search for exact cabin lookup, or use the quick controls to browse cabins without typing. "
-    "The summary tables below update in the same page."
+    "Type the cabin number/name for direct lookup. Cabin navigation buttons are placed beside the summary tables below."
 )
 
 # First row: typed search + availability.
@@ -1333,96 +1332,6 @@ with col_search:
 
 with col_available:
     st.metric("Available under filter", len(cabin_options_df))
-
-# Resolve current typed text before rendering navigation controls.
-current_query = st.session_state.get(cabin_search_key, "")
-current_key_for_nav, _, _ = resolve_cabin_text_input(cabin_options_df, current_query)
-
-browse_df = cabin_options_df.reset_index(drop=True)
-browse_keys = browse_df["__cabin_key"].tolist()
-
-if current_key_for_nav in browse_keys:
-    current_pos = browse_keys.index(current_key_for_nav)
-elif ranked_default_key in browse_keys:
-    current_pos = browse_keys.index(ranked_default_key)
-else:
-    current_pos = 0
-
-# Second row: spinner + previous/next buttons.
-st.markdown("#### Quick cabin controls")
-col_spin, col_open_no, col_prev, col_next = st.columns([1.1, 0.8, 0.8, 0.8])
-
-with col_spin:
-    cabin_number_choice = st.number_input(
-        "Cabin position",
-        min_value=1,
-        max_value=max(1, len(browse_keys)),
-        value=min(current_pos + 1, max(1, len(browse_keys))),
-        step=1,
-        help="Browse by the current filtered cabin list.",
-        key=f"cabin_position_{province}_{cabin_type_filter}",
-    )
-
-with col_open_no:
-    st.write("")
-    st.write("")
-    if st.button("Open #", key=f"open_cabin_number_{province}_{cabin_type_filter}", use_container_width=True):
-        target_key = browse_keys[int(cabin_number_choice) - 1]
-        target_row = get_row_from_meta(meta_2026_indexed, target_key)
-        if target_row is not None:
-            st.session_state[cabin_search_key] = str(target_row["display_name"])
-            st.rerun()
-
-with col_prev:
-    st.write("")
-    st.write("")
-    if st.button("◀ Previous", key=f"previous_cabin_{province}_{cabin_type_filter}", use_container_width=True):
-        target_pos = max(0, current_pos - 1)
-        target_key = browse_keys[target_pos]
-        target_row = get_row_from_meta(meta_2026_indexed, target_key)
-        if target_row is not None:
-            st.session_state[cabin_search_key] = str(target_row["display_name"])
-            st.rerun()
-
-with col_next:
-    st.write("")
-    st.write("")
-    if st.button("Next ▶", key=f"next_cabin_{province}_{cabin_type_filter}", use_container_width=True):
-        target_pos = min(len(browse_keys) - 1, current_pos + 1)
-        target_key = browse_keys[target_pos]
-        target_row = get_row_from_meta(meta_2026_indexed, target_key)
-        if target_row is not None:
-            st.session_state[cabin_search_key] = str(target_row["display_name"])
-            st.rerun()
-
-# Third row: click from visible ranking, useful for investigation workflow.
-if not visible_ranking_df.empty:
-    rank_options = visible_ranking_df["__cabin_key"].tolist()
-    rank_label_map = {}
-    for _, r in visible_ranking_df.iterrows():
-        rank_label_map[r["__cabin_key"]] = (
-            f"Rank {int(r['Rank']):03d} | Cabin {r['display_name']} | "
-            f"Gap {format_number(r['rank_gap'], 0)} kWh | Loss {format_percent(r['rank_loss_pct'])}"
-        )
-
-    col_rank_select, col_rank_open = st.columns([3.1, 0.8])
-    with col_rank_select:
-        ranked_choice_key = st.selectbox(
-            "Choose from visible ranking",
-            options=rank_options,
-            index=rank_options.index(current_key_for_nav) if current_key_for_nav in rank_options else 0,
-            format_func=lambda key: rank_label_map.get(key, key),
-            key=f"ranked_cabin_choice_{province}_{ranking_month}_{top_n_choice}",
-        )
-
-    with col_rank_open:
-        st.write("")
-        st.write("")
-        if st.button("Open ranked", key=f"open_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
-            target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
-            if target_row is not None:
-                st.session_state[cabin_search_key] = str(target_row["display_name"])
-                st.rerun()
 
 # Final resolution used by the rest of the report.
 cabin_query = st.session_state.get(cabin_search_key, "")
@@ -1482,12 +1391,88 @@ st.markdown("### Sale vs Total — 2026")
 st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_container_width=True)
 
 st.markdown("### Summary Tables — Same Place, No Separate Tabs")
-for year in [2026, 2025, 2024]:
-    st.markdown(f"#### Summary Table ({year})")
-    if year in summary_by_year:
-        st.dataframe(format_summary_for_display(summary_by_year[year]), use_container_width=True, hide_index=True)
-    else:
-        st.info(status_by_year.get(year, f"No {year} data available."))
+
+# Cabin navigation is intentionally placed beside the summary tables, not above the report.
+# The text input remains the main exact-search method; these controls are for browsing while reviewing tables.
+browse_df = cabin_options_df.reset_index(drop=True)
+browse_keys = browse_df["__cabin_key"].tolist()
+
+if selected_cabin_key in browse_keys:
+    current_pos = browse_keys.index(selected_cabin_key)
+else:
+    current_pos = 0
+
+summary_table_col, summary_control_col = st.columns([3.2, 1.0])
+
+with summary_control_col:
+    st.markdown("#### Browse cabins")
+    st.caption("Use these buttons while checking the three yearly summary tables.")
+    st.metric("Current position", f"{current_pos + 1}/{len(browse_keys)}")
+
+    if st.button("◀ Previous cabin", key=f"summary_previous_cabin_{province}_{cabin_type_filter}", use_container_width=True):
+        target_pos = max(0, current_pos - 1)
+        target_key = browse_keys[target_pos]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[cabin_search_key] = str(target_row["display_name"])
+            st.rerun()
+
+    if st.button("Next cabin ▶", key=f"summary_next_cabin_{province}_{cabin_type_filter}", use_container_width=True):
+        target_pos = min(len(browse_keys) - 1, current_pos + 1)
+        target_key = browse_keys[target_pos]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[cabin_search_key] = str(target_row["display_name"])
+            st.rerun()
+
+    cabin_number_choice = st.number_input(
+        "Cabin position",
+        min_value=1,
+        max_value=max(1, len(browse_keys)),
+        value=min(current_pos + 1, max(1, len(browse_keys))),
+        step=1,
+        help="Browse by the current filtered cabin list.",
+        key=f"summary_cabin_position_{province}_{cabin_type_filter}_{selected_cabin_key}",
+    )
+
+    if st.button("Open selected position", key=f"summary_open_cabin_position_{province}_{cabin_type_filter}", use_container_width=True):
+        target_key = browse_keys[int(cabin_number_choice) - 1]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[cabin_search_key] = str(target_row["display_name"])
+            st.rerun()
+
+    if not visible_ranking_df.empty:
+        with st.expander("Open from visible ranking", expanded=False):
+            rank_options = visible_ranking_df["__cabin_key"].tolist()
+            rank_label_map = {}
+            for _, r in visible_ranking_df.iterrows():
+                rank_label_map[r["__cabin_key"]] = (
+                    f"Rank {int(r['Rank']):03d} | Cabin {r['display_name']} | "
+                    f"Gap {format_number(r['rank_gap'], 0)} kWh | Loss {format_percent(r['rank_loss_pct'])}"
+                )
+
+            ranked_choice_key = st.selectbox(
+                "Visible ranking cabin",
+                options=rank_options,
+                index=rank_options.index(selected_cabin_key) if selected_cabin_key in rank_options else 0,
+                format_func=lambda key: rank_label_map.get(key, key),
+                key=f"summary_ranked_cabin_choice_{province}_{ranking_month}_{top_n_choice}_{selected_cabin_key}",
+            )
+
+            if st.button("Open ranked cabin", key=f"summary_open_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
+                target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
+                if target_row is not None:
+                    st.session_state[cabin_search_key] = str(target_row["display_name"])
+                    st.rerun()
+
+with summary_table_col:
+    for year in [2026, 2025, 2024]:
+        st.markdown(f"#### Summary Table ({year})")
+        if year in summary_by_year:
+            st.dataframe(format_summary_for_display(summary_by_year[year]), use_container_width=True, hide_index=True)
+        else:
+            st.info(status_by_year.get(year, f"No {year} data available."))
 
 with st.expander("Matched raw rows — 2026"):
     raw_display = data_2026["df"][data_2026["df"]["__cabin_key"] == selected_cabin_key].copy()
