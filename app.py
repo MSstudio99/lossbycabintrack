@@ -1192,27 +1192,32 @@ def make_loss_curve_png_image_sized(
     loss_by_year: Dict[int, list[float]],
     title: str,
     subtitle: Optional[str] = None,
-    width: int = 3200,
-    height: int = 900,
+    width: int = 2200,
+    height: int = 1200,
 ) -> Image.Image:
-    """High-resolution loss chart for print/PDF export."""
+    """High-resolution loss chart for print/PDF export.
+
+    Tuned for readability in A4 portrait exports. The point labels are
+    intentionally larger and placed farther from the markers so printed values
+    remain readable.
+    """
     margin_l = 170
-    margin_r = 90
-    margin_t = 210
-    margin_b = 120
+    margin_r = 80
+    margin_t = 220
+    margin_b = 145
 
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    font_title = get_pil_font(52, bold=True)
-    font_subtitle = get_pil_font(30)
-    font_axis = get_pil_font(26)
-    font_legend = get_pil_font(28, bold=True)
-    font_label = get_pil_font(24, bold=True)
+    font_title = get_pil_font(54, bold=True)
+    font_subtitle = get_pil_font(28)
+    font_axis = get_pil_font(28)
+    font_legend = get_pil_font(30, bold=True)
+    font_label = get_pil_font(34, bold=True)
 
     draw.text((40, 34), title, font=font_title, fill="#0f172a")
     if subtitle:
-        draw.text((40, 104), subtitle[:180], font=font_subtitle, fill="#475569")
+        draw.text((40, 108), subtitle[:160], font=font_subtitle, fill="#475569")
 
     plot_x1, plot_y1 = margin_l, margin_t
     plot_x2, plot_y2 = width - margin_r, height - margin_b
@@ -1226,7 +1231,7 @@ def make_loss_curve_png_image_sized(
     if y_max == y_min:
         y_max = y_min + 5
 
-    y_padding = (y_max - y_min) * 0.16
+    y_padding = (y_max - y_min) * 0.18
     y_min -= y_padding
     y_max += y_padding
 
@@ -1234,7 +1239,7 @@ def make_loss_curve_png_image_sized(
         y_val = y_min + (y_max - y_min) * i / 5
         y = plot_y2 - (y_val - y_min) / (y_max - y_min) * (plot_y2 - plot_y1)
         draw.line([(plot_x1, y), (plot_x2, y)], fill="#e5e7eb", width=2)
-        draw.text((40, y - 16), f"{y_val:.1f}%", font=font_axis, fill="#64748b")
+        draw.text((36, y - 18), f"{y_val:.1f}%", font=font_axis, fill="#64748b")
 
     draw.line([(plot_x1, plot_y1), (plot_x1, plot_y2)], fill="#334155", width=4)
     draw.line([(plot_x1, plot_y2), (plot_x2, plot_y2)], fill="#334155", width=4)
@@ -1244,24 +1249,24 @@ def make_loss_curve_png_image_sized(
         x = plot_x1 + idx * (plot_x2 - plot_x1) / (len(MONTHS) - 1)
         x_positions.append(x)
         draw.line([(x, plot_y2), (x, plot_y2 + 10)], fill="#334155", width=2)
-        draw_centered_text(draw, (x - 55, plot_y2 + 22, x + 55, plot_y2 + 76), month, font_axis, "#334155")
+        draw_centered_text(draw, (x - 58, plot_y2 + 24, x + 58, plot_y2 + 82), month, font_axis, "#334155")
 
     year_styles = {
-        2024: {"color": "#f59e0b", "label_offset": -54},
-        2025: {"color": "#8b5cf6", "label_offset": 34},
-        2026: {"color": "#ef4444", "label_offset": -92},
+        2024: {"color": "#f59e0b", "label_offset": -78},
+        2025: {"color": "#8b5cf6", "label_offset": 40},
+        2026: {"color": "#ef4444", "label_offset": -130},
     }
 
-    legend_x, legend_y = width - 890, 42
+    legend_x, legend_y = width - 760, 42
     for idx, year in enumerate(sorted(loss_by_year)):
         color = year_styles.get(year, {"color": "#334155"})["color"]
-        ly = legend_y + idx * 50
+        ly = legend_y + idx * 56
         draw.line([(legend_x, ly + 20), (legend_x + 82, ly + 20)], fill=color, width=8)
         draw.ellipse([legend_x + 31, ly + 8, legend_x + 51, ly + 28], fill=color)
         draw.text((legend_x + 110, ly), f"Loss % ({year})", font=font_legend, fill="#0f172a")
 
     for year in sorted(loss_by_year):
-        style = year_styles.get(year, {"color": "#334155", "label_offset": -54})
+        style = year_styles.get(year, {"color": "#334155", "label_offset": -78})
         color = style["color"]
         label_offset = style["label_offset"]
         values = loss_by_year[year]
@@ -1274,16 +1279,15 @@ def make_loss_curve_png_image_sized(
         if len(curve) > 1:
             draw.line(curve, fill=color, width=8)
         for idx, (x, y) in enumerate(points):
-            draw.ellipse([x - 10, y - 10, x + 10, y + 10], fill=color, outline="white", width=4)
+            draw.ellipse([x - 11, y - 11, x + 11, y + 11], fill=color, outline="white", width=4)
             label = f"{values[idx]:.2f}%"
             bbox = draw.textbbox((0, 0), label, font=font_label)
             label_w = bbox[2] - bbox[0]
-            label_y = max(plot_y1 - 78, min(y + label_offset, plot_y2 + 20))
-            label_x = max(plot_x1 - 45, min(x - label_w / 2, plot_x2 - label_w + 45))
+            label_y = max(plot_y1 - 90, min(y + label_offset, plot_y2 + 22))
+            label_x = max(plot_x1 - 50, min(x - label_w / 2, plot_x2 - label_w + 50))
             draw_label_box(draw, label_x, label_y, label, font_label, color)
 
     return img
-
 
 def draw_table_on_image(
     draw: ImageDraw.ImageDraw,
@@ -1348,29 +1352,28 @@ def make_high_res_table_page(
     title: str,
     subtitle: str,
     col_weights: Optional[list[float]] = None,
-    row_h: int = 115,
+    row_h: int = 82,
 ) -> Image.Image:
-    """Create one A4 landscape 300 DPI PNG page for a table."""
-    width, height = A4_LANDSCAPE_PX
+    """Create one A4 portrait 300 DPI PNG page for a table."""
+    width, height = A4_PORTRAIT_PX
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    margin_x = 120
-    y = 95
-    title_font = get_pil_font(64, bold=True)
-    subtitle_font = get_pil_font(32)
-    header_font = get_pil_font(30, bold=True)
-    cell_font = get_pil_font(28)
+    margin_x = 85
+    y = 90
+    title_font = get_pil_font(52, bold=True)
+    subtitle_font = get_pil_font(25)
+    header_font = get_pil_font(21, bold=True)
+    cell_font = get_pil_font(20)
 
     draw.text((margin_x, y), title, font=title_font, fill="#0f172a")
-    y += 84
-    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#475569")
-    y += 88
+    y += 70
+    draw.text((margin_x, y), subtitle[:150], font=subtitle_font, fill="#475569")
+    y += 76
 
     table_width = width - margin_x * 2
     draw_table_on_image(draw, display_df, margin_x, y, table_width, row_h, header_font, cell_font, col_weights)
     return img
-
 
 def make_high_res_overview_page(
     province: str,
@@ -1380,53 +1383,52 @@ def make_high_res_overview_page(
     yearly_kpi_df: pd.DataFrame,
     loss_by_year: Dict[int, list[float]],
 ) -> Image.Image:
-    """Create A4 landscape page with KPI table and high-resolution chart."""
-    width, height = A4_LANDSCAPE_PX
+    """Create A4 portrait page with KPI table and readable high-resolution chart."""
+    width, height = A4_PORTRAIT_PX
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
 
-    margin_x = 120
-    y = 80
-    title_font = get_pil_font(68, bold=True)
-    subtitle_font = get_pil_font(34)
-    note_font = get_pil_font(28)
-    header_font = get_pil_font(30, bold=True)
-    cell_font = get_pil_font(30)
+    margin_x = 85
+    y = 72
+    title_font = get_pil_font(56, bold=True)
+    subtitle_font = get_pil_font(27)
+    note_font = get_pil_font(22)
+    header_font = get_pil_font(21, bold=True)
+    cell_font = get_pil_font(21)
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     draw.text((margin_x, y), "EDC Cabin Loss Printable Report", font=title_font, fill="#0f172a")
-    y += 92
-    draw.text((margin_x, y), subtitle[:170], font=subtitle_font, fill="#334155")
-    y += 54
-    draw.text((margin_x, y), "Print-ready export: A4 landscape, 300 DPI PNG pages. Use the PDF for the sharpest printed report.", font=note_font, fill="#64748b")
-    y += 92
+    y += 76
+    draw.text((margin_x, y), subtitle[:150], font=subtitle_font, fill="#334155")
+    y += 42
+    draw.text((margin_x, y), "Print-ready export: A4 portrait, 300 DPI PNG pages.", font=note_font, fill="#64748b")
+    y += 68
 
     kpi_display = format_yearly_kpi_table(yearly_kpi_df)
-    draw.text((margin_x, y), "Yearly KPI Comparison", font=get_pil_font(42, bold=True), fill="#0f172a")
-    y += 62
+    draw.text((margin_x, y), "Yearly KPI Comparison", font=get_pil_font(34, bold=True), fill="#0f172a")
+    y += 48
     draw_table_on_image(
         draw,
         kpi_display,
         margin_x,
         y,
         width - margin_x * 2,
-        92,
+        72,
         header_font,
         cell_font,
-        col_weights=[0.8, 1.5, 1.5, 1.5, 1.4, 1.6],
+        col_weights=[0.75, 1.35, 1.35, 1.35, 1.2, 1.4],
     )
-    y += 92 * (len(kpi_display) + 1) + 60
+    y += 72 * (len(kpi_display) + 1) + 40
 
     chart_img = make_loss_curve_png_image_sized(
         loss_by_year,
         title="Loss % Trend by Month",
         subtitle=subtitle,
         width=width - margin_x * 2,
-        height=900,
+        height=1250,
     )
     img.paste(chart_img, (margin_x, y))
     return img
-
 
 def build_high_res_png_pages_zip_bytes(
     province: str,
@@ -1438,54 +1440,55 @@ def build_high_res_png_pages_zip_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build a ZIP containing separate A4 300 DPI PNG pages.
-
-    This avoids the blurry one-long-PNG problem and keeps each page printable.
-    """
+    """Build a ZIP containing separate A4 portrait 300 DPI PNG pages."""
     safe_cabin = safe_filename(cabin_name)
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
 
     pages: list[tuple[str, Image.Image]] = []
     pages.append((
-        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Overview_A4_300DPI.png"),
+        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Overview_A4_Portrait_300DPI.png"),
         make_high_res_overview_page(province, cabin_name, cabin_type, ranking_month, yearly_kpi_df, loss_by_year),
     ))
 
     pages.append((
-        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_300DPI.png"),
+        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Portrait_300DPI.png"),
         make_high_res_table_page(
             format_loss_comparison_table(loss_compare_df),
             title="Monthly Loss % Comparison",
             subtitle=subtitle,
-            col_weights=[1.7, 1.0, 1.0, 1.0],
-            row_h=105,
+            col_weights=[1.55, 1.0, 1.0, 1.0],
+            row_h=82,
         ),
     ))
 
     page_no = 3
-    summary_weights = [0.9, 2.5, 1.0] + [1.45] * 12 + [2.0, 1.8]
+    summary_chunks = [
+        ("Jan_to_Apr", ["No", "Description", "Unit", "Jan", "Feb", "Mar", "Apr"], [0.65, 1.8, 0.8, 1.0, 1.0, 1.0, 1.0]),
+        ("May_to_Aug", ["No", "Description", "Unit", "May", "Jun", "Jul", "Aug"], [0.65, 1.8, 0.8, 1.0, 1.0, 1.0, 1.0]),
+        ("Sep_to_Dec_and_Totals", ["No", "Description", "Unit", "Sep", "Oct", "Nov", "Dec", "Accumulate", "Average"], [0.55, 1.6, 0.7, 0.9, 0.9, 0.9, 0.9, 1.3, 1.2]),
+    ]
     for year in [2026, 2025, 2024]:
         if year not in summary_by_year:
             continue
-        pages.append((
-            safe_filename(f"{page_no:02d}_{province}_Cabin_{safe_cabin}_Summary_{year}_A4_300DPI.png"),
-            make_high_res_table_page(
-                format_summary_for_display(summary_by_year[year]),
-                title=f"Summary Table ({year})",
-                subtitle=subtitle,
-                col_weights=summary_weights,
-                row_h=125,
-            ),
-        ))
-        page_no += 1
+        display = format_summary_for_display(summary_by_year[year])
+        for chunk_name, columns, weights in summary_chunks:
+            pages.append((
+                safe_filename(f"{page_no:02d}_{province}_Cabin_{safe_cabin}_Summary_{year}_{chunk_name}_A4_Portrait_300DPI.png"),
+                make_high_res_table_page(
+                    display[columns],
+                    title=f"Summary Table ({year}) - {chunk_name.replace('_', ' ')}",
+                    subtitle=subtitle,
+                    col_weights=weights,
+                    row_h=90,
+                ),
+            ))
+            page_no += 1
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         for filename, page_img in pages:
             zipf.writestr(filename, image_to_png_bytes(page_img, dpi=PRINT_DPI))
     return zip_buffer.getvalue()
-
-
 
 def _pdf_cell_text(value) -> str:
     """Safe short text for ReportLab tables."""
@@ -1575,7 +1578,7 @@ def _pdf_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(HexColor("#64748b"))
-    canvas.drawString(doc.leftMargin, 18, "EDC Cabin Loss Dashboard - A4 landscape selected cabin report")
+    canvas.drawString(doc.leftMargin, 18, "EDC Cabin Loss Dashboard - A4 portrait selected cabin report")
     canvas.drawRightString(doc.pagesize[0] - doc.rightMargin, 18, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -1590,25 +1593,20 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build an A4 landscape PDF with readable tables.
-
-    Key design change:
-    - The wide yearly summary table is split into Jan-Jun and Jul-Dec + Accumulate/Average.
-    - This avoids tiny fonts and makes the report readable when printed on A4.
-    """
+    """Build an A4 portrait PDF with readable tables and larger chart labels."""
     try:
         from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
-    page_size = landscape(A4)
+    page_size = A4
     page_w, page_h = page_size
-    margin_l = 28
-    margin_r = 28
+    margin_l = 30
+    margin_r = 30
     usable_w = page_w - margin_l - margin_r
 
     buffer = io.BytesIO()
@@ -1623,117 +1621,118 @@ def make_printable_selected_report_pdf_bytes(
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "ReportTitleA4",
+        "ReportTitleA4Portrait",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=22,
-        leading=26,
+        fontSize=19,
+        leading=23,
         textColor=colors.HexColor("#0f172a"),
         spaceAfter=8,
         alignment=0,
     )
     h1_style = ParagraphStyle(
-        "ReportH1A4",
+        "ReportH1A4Portrait",
         parent=styles["Heading1"],
         fontName="Helvetica-Bold",
-        fontSize=16,
-        leading=20,
+        fontSize=14,
+        leading=18,
         textColor=colors.HexColor("#0f172a"),
         spaceBefore=4,
         spaceAfter=8,
     )
     h2_style = ParagraphStyle(
-        "ReportH2A4",
+        "ReportH2A4Portrait",
         parent=styles["Heading2"],
         fontName="Helvetica-Bold",
-        fontSize=12.5,
-        leading=15,
+        fontSize=11.3,
+        leading=14,
         textColor=colors.HexColor("#0f172a"),
         spaceBefore=6,
         spaceAfter=6,
     )
     small_style = ParagraphStyle(
-        "SmallA4",
+        "SmallA4Portrait",
         parent=styles["BodyText"],
-        fontSize=9.5,
-        leading=12,
+        fontSize=9.0,
+        leading=11.2,
         textColor=colors.HexColor("#475569"),
     )
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     story = []
 
-    # Page 1 - overview and chart.
+    # Page 1 - overview and KPI table.
     story.append(Paragraph("EDC Cabin Loss Printable Report", title_style))
-    story.append(Paragraph("A4 landscape format - selected cabin report", small_style))
+    story.append(Paragraph("A4 portrait format - selected cabin report", small_style))
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("Yearly KPI Comparison", h2_style))
     story.append(_reportlab_table(
         format_yearly_kpi_table(yearly_kpi_df),
-        col_widths=[0.72 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.55 * inch],
-        font_size=9.4,
-        header_font_size=9.8,
+        col_widths=[0.58 * inch, 0.95 * inch, 0.95 * inch, 0.95 * inch, 1.05 * inch, 1.15 * inch],
+        font_size=8.2,
+        header_font_size=8.6,
         numeric_start_col=1,
     ))
-    story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Loss % Trend by Month", h2_style))
+    # Page 2 - chart only, larger and readable.
+    story.append(PageBreak())
+    story.append(Paragraph("Loss % Trend by Month", h1_style))
+    story.append(Paragraph(subtitle, small_style))
+    story.append(Spacer(1, 8))
     chart_png = image_to_png_bytes(
-        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=2600, height=780),
+        make_loss_curve_png_image_sized(loss_by_year, "Loss % Trend by Month", subtitle, width=1700, height=1100),
         dpi=PRINT_DPI,
     )
-    story.append(RLImage(io.BytesIO(chart_png), width=min(usable_w, 10.4 * inch), height=3.1 * inch))
+    story.append(RLImage(io.BytesIO(chart_png), width=min(usable_w, 7.1 * inch), height=4.6 * inch))
 
-    # Page 2 - monthly comparison.
+    # Page 3 - monthly comparison.
     story.append(PageBreak())
     story.append(Paragraph("Monthly Loss % Comparison", h1_style))
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 10))
     story.append(_reportlab_table(
         format_loss_comparison_table(loss_compare_df),
-        col_widths=[2.25 * inch, 1.55 * inch, 1.55 * inch, 1.55 * inch],
-        font_size=10.2,
-        header_font_size=10.6,
+        col_widths=[1.95 * inch, 1.18 * inch, 1.18 * inch, 1.18 * inch],
+        font_size=8.9,
+        header_font_size=9.2,
         numeric_start_col=1,
     ))
 
-    # Pages 3+ - yearly summaries, each year split into two readable sections.
-    summary_first_widths = [0.42 * inch, 1.35 * inch, 0.55 * inch] + [0.9 * inch] * 6
-    summary_second_widths = [0.42 * inch, 1.35 * inch, 0.55 * inch] + [0.78 * inch] * 6 + [1.0 * inch, 0.9 * inch]
+    # Pages 4+ - yearly summaries split into 3 readable portrait sections.
+    summary_sections = [
+        ("January to April", ["No", "Description", "Unit", "Jan", "Feb", "Mar", "Apr"], [0.42 * inch, 1.18 * inch, 0.48 * inch, 0.72 * inch, 0.72 * inch, 0.72 * inch, 0.72 * inch]),
+        ("May to August", ["No", "Description", "Unit", "May", "Jun", "Jul", "Aug"], [0.42 * inch, 1.18 * inch, 0.48 * inch, 0.72 * inch, 0.72 * inch, 0.72 * inch, 0.72 * inch]),
+        ("September to December, Accumulate and Average", ["No", "Description", "Unit", "Sep", "Oct", "Nov", "Dec", "Accumulate", "Average"], [0.38 * inch, 1.02 * inch, 0.44 * inch, 0.60 * inch, 0.60 * inch, 0.60 * inch, 0.60 * inch, 0.88 * inch, 0.82 * inch]),
+    ]
 
     for year in [2026, 2025, 2024]:
-        story.append(PageBreak())
-        story.append(Paragraph(f"Summary Table ({year})", h1_style))
-        story.append(Paragraph(subtitle, small_style))
-        story.append(Spacer(1, 8))
-
-        if year in summary_by_year:
-            first_half, second_half = _summary_display_halves_for_pdf(summary_by_year[year])
-            story.append(Paragraph("January to June", h2_style))
-            story.append(_reportlab_table(
-                first_half,
-                col_widths=summary_first_widths,
-                font_size=9.2,
-                header_font_size=9.5,
-                numeric_start_col=3,
-            ))
-            story.append(Spacer(1, 14))
-            story.append(Paragraph("July to December, Accumulate and Average", h2_style))
-            story.append(_reportlab_table(
-                second_half,
-                col_widths=summary_second_widths,
-                font_size=8.7,
-                header_font_size=9.0,
-                numeric_start_col=3,
-            ))
-        else:
+        if year not in summary_by_year:
+            story.append(PageBreak())
+            story.append(Paragraph(f"Summary Table ({year})", h1_style))
+            story.append(Paragraph(subtitle, small_style))
+            story.append(Spacer(1, 10))
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
+            continue
+
+        display = format_summary_for_display(summary_by_year[year])
+        for idx, (section_title, columns, widths) in enumerate(summary_sections):
+            story.append(PageBreak())
+            story.append(Paragraph(f"Summary Table ({year})", h1_style))
+            story.append(Paragraph(subtitle, small_style))
+            story.append(Spacer(1, 8))
+            story.append(Paragraph(section_title, h2_style))
+            story.append(_reportlab_table(
+                display[columns],
+                col_widths=widths,
+                font_size=8.3 if len(columns) <= 7 else 7.8,
+                header_font_size=8.6 if len(columns) <= 7 else 8.1,
+                numeric_start_col=3,
+            ))
 
     doc.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
     return buffer.getvalue()
-
 
 def build_selected_pdf_report_package_zip_bytes(
     province: str,
