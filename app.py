@@ -41,6 +41,22 @@ MONTH_MAP = {
 }
 MONTH_FULL_LIST = list(MONTH_MAP.values())
 
+# =========================================================
+# PDF FONT / TITLE CONFIG
+# =========================================================
+# To use Khmer in PDF titles, add these two files to your GitHub repo:
+#   fonts/NotoSansKhmer-Regular.ttf
+#   fonts/NotoSansKhmer-Bold.ttf
+#
+# Do not change the font names below unless you also change the registered names
+# inside register_pdf_fonts().
+PDF_KHMER_REGULAR_FONT_PATH = Path("fonts/NotoSansKhmer-Regular.ttf")
+PDF_KHMER_BOLD_FONT_PATH = Path("fonts/NotoSansKhmer-Bold.ttf")
+
+# Change these strings to Khmer whenever needed.
+PDF_MAIN_TITLE_TEXT = "តារាងសង្ខេប — 2026, 2025, 2024"
+PDF_KPI_TITLE_TEXT = "ការប្រៀបធៀប KPI ប្រចាំឆ្នាំ"
+
 st.set_page_config(
     page_title="EDC Cabin Loss Dashboard",
     page_icon="⚡",
@@ -1613,6 +1629,8 @@ def _reportlab_table(
     from reportlab.lib import colors
     from reportlab.platypus import Table, TableStyle
 
+    pdf_regular_font, pdf_bold_font = register_pdf_fonts()
+
     clean_df = display_df.copy().astype(str)
     data = [clean_df.columns.astype(str).tolist()] + clean_df.values.tolist()
     data = [[_pdf_cell_text(cell) for cell in row] for row in data]
@@ -1621,9 +1639,9 @@ def _reportlab_table(
     style_items = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), pdf_bold_font),
         ("FONTSIZE", (0, 0), (-1, 0), header_font_size),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 1), (-1, -1), pdf_regular_font),
         ("FONTSIZE", (0, 1), (-1, -1), font_size),
         ("LEADING", (0, 0), (-1, -1), font_size + 2.2),
         ("ALIGN", (0, 0), (-1, 0), "CENTER"),
@@ -1647,10 +1665,10 @@ def _reportlab_table(
 
         if "gap" in labels or "total - sale" in labels:
             bg, fg = "#ffedd5", "#9a3412"
-            style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
+            style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), pdf_bold_font))
         elif first.startswith("weighted") or first.startswith("average"):
             bg, fg = "#f8fafc", "#0f172a"
-            style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
+            style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), pdf_bold_font))
         else:
             bg, fg = None, None
 
@@ -1686,6 +1704,45 @@ def _summary_display_halves_for_pdf(summary_df: pd.DataFrame) -> tuple[pd.DataFr
     second_cols = ["No", "Description", "Unit", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Accumulate", "Average"]
     return display[first_cols].copy(), display[second_cols].copy()
 
+
+def register_pdf_fonts() -> tuple[str, str]:
+    """Register Khmer-capable PDF fonts when font files exist.
+
+    Return:
+        (regular_font_name, bold_font_name)
+
+    Required files for Khmer support:
+        fonts/NotoSansKhmer-Regular.ttf
+        fonts/NotoSansKhmer-Bold.ttf
+
+    If the files are missing, the PDF still builds using Helvetica fallback,
+    but Khmer text may not render correctly until the font files are added.
+    """
+    regular_font = "Helvetica"
+    bold_font = "Helvetica-Bold"
+
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        if PDF_KHMER_REGULAR_FONT_PATH.exists():
+            pdfmetrics.registerFont(TTFont("KhmerRegular", str(PDF_KHMER_REGULAR_FONT_PATH)))
+            regular_font = "KhmerRegular"
+
+        if PDF_KHMER_BOLD_FONT_PATH.exists():
+            pdfmetrics.registerFont(TTFont("KhmerBold", str(PDF_KHMER_BOLD_FONT_PATH)))
+            bold_font = "KhmerBold"
+        elif PDF_KHMER_REGULAR_FONT_PATH.exists():
+            # Use regular Khmer font as fallback for bold title if bold file is missing.
+            bold_font = regular_font
+
+    except Exception:
+        regular_font = "Helvetica"
+        bold_font = "Helvetica-Bold"
+
+    return regular_font, bold_font
+
+
 def _pdf_footer(canvas, doc):
     from reportlab.lib.colors import HexColor
     canvas.saveState()
@@ -1715,8 +1772,10 @@ def _reportlab_summary_table_with_rotated_year(
     from reportlab.lib import colors
     from reportlab.platypus import Flowable, Table, TableStyle
 
+    pdf_regular_font, pdf_bold_font = register_pdf_fonts()
+
     class RotatedYearText(Flowable):
-        def __init__(self, text: str, font_name: str = "Helvetica-Bold", font_size: float = 11):
+        def __init__(self, text: str, font_name: str = pdf_bold_font, font_size: float = 11):
             super().__init__()
             self.text = str(text)
             self.font_name = font_name
@@ -1760,9 +1819,9 @@ def _reportlab_summary_table_with_rotated_year(
 
         ("BACKGROUND", (1, 0), (-1, 0), colors.HexColor("#0f172a")),
         ("TEXTCOLOR", (1, 0), (-1, 0), colors.white),
-        ("FONTNAME", (1, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (1, 0), (-1, 0), pdf_bold_font),
         ("FONTSIZE", (1, 0), (-1, 0), header_font_size),
-        ("FONTNAME", (1, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (1, 1), (-1, -1), pdf_regular_font),
         ("FONTSIZE", (1, 1), (-1, -1), font_size),
         # PDF UNIT COLUMN VALUE FONT SIZE - edit unit_font_size in the function call below.
         # Column index 2 is Unit; rows 1 to end are the kWh/% body values.
@@ -1785,7 +1844,7 @@ def _reportlab_summary_table_with_rotated_year(
         metric = str(row[1]).strip().lower() if len(row) > 1 else ""
         if metric == "gap":
             bg, fg = "#ffedd5", "#9a3412"
-            style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), "Helvetica-Bold"))
+            style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), pdf_bold_font))
         else:
             bg, fg = None, None
 
@@ -1818,6 +1877,8 @@ def make_printable_selected_report_pdf_bytes(
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
+    pdf_regular_font, pdf_bold_font = register_pdf_fonts()
+
     page_size = landscape(A4)
     page_w, page_h = page_size
     margin_l = 24
@@ -1838,7 +1899,7 @@ def make_printable_selected_report_pdf_bytes(
     title_style = ParagraphStyle(
         "ReportTitleA4LandscapeClear",
         parent=styles["Title"],
-        fontName="Helvetica-Bold",
+        fontName=pdf_bold_font,
         fontSize=21,
         leading=25,
         textColor=colors.HexColor("#0f172a"),
@@ -1848,7 +1909,7 @@ def make_printable_selected_report_pdf_bytes(
     h1_style = ParagraphStyle(
         "ReportH1A4LandscapeClear",
         parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
+        fontName=pdf_bold_font,
         fontSize=15,
         leading=18,
         textColor=colors.HexColor("#0f172a"),
@@ -1859,7 +1920,7 @@ def make_printable_selected_report_pdf_bytes(
     h2_style = ParagraphStyle(
         "ReportH2A4LandscapeClear",
         parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
+        fontName=pdf_bold_font,
         fontSize=12,
         leading=14,
         textColor=colors.HexColor("#0f172a"),
@@ -1870,6 +1931,7 @@ def make_printable_selected_report_pdf_bytes(
     small_style = ParagraphStyle(
         "SmallA4LandscapeClear",
         parent=styles["BodyText"],
+        fontName=pdf_regular_font,
         fontSize=9.0,
         leading=11,
         textColor=colors.HexColor("#475569"),
@@ -1880,6 +1942,7 @@ def make_printable_selected_report_pdf_bytes(
     top_right_info_style = ParagraphStyle(
         "TopRightProvinceCabinBox",
         parent=styles["BodyText"],
+        fontName=pdf_bold_font,
         fontSize=12.5,
         leading=14,
         textColor=colors.HexColor("#0f172a"),
@@ -1912,7 +1975,7 @@ def make_printable_selected_report_pdf_bytes(
 
     # Page 1 - all yearly summaries together, with KPI and note below.
     story.append(Paragraph(top_right_info, top_right_info_style))
-    story.append(Paragraph("Summary Tables — 2026, 2025, 2024", h1_style))
+    story.append(Paragraph(PDF_MAIN_TITLE_TEXT, h1_style))
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 2))
 
@@ -1936,7 +1999,7 @@ def make_printable_selected_report_pdf_bytes(
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
         story.append(Spacer(1, 3))
 
-    story.append(Paragraph("Yearly KPI Comparison", h2_style))
+    story.append(Paragraph(PDF_KPI_TITLE_TEXT, h2_style))
     story.append(_reportlab_table(
         format_yearly_kpi_table(yearly_kpi_df),
         col_widths=[0.72 * inch, 1.34 * inch, 1.34 * inch, 1.34 * inch, 1.30 * inch, 1.48 * inch],
@@ -2341,7 +2404,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v19_smaller_unit_column_values"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v20_khmer_pdf_titles"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2412,7 +2475,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v19_smaller_unit_column_values"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v20_khmer_pdf_titles"
 
 for state_key in [
     "report_cache_key",
