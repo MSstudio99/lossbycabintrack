@@ -1371,8 +1371,8 @@ def make_high_res_table_page(
     y = 90
     title_font = get_pil_font(60, bold=True)
     subtitle_font = get_pil_font(30)
-    header_font = get_pil_font(27, bold=True)
-    cell_font = get_pil_font(26)
+    header_font = get_pil_font(28, bold=True)
+    cell_font = get_pil_font(27)
 
     draw.text((margin_x, y), title, font=title_font, fill="#0f172a")
     y += 78
@@ -1456,8 +1456,8 @@ def make_high_res_all_summary_tables_one_page(
     title_font = get_pil_font(56, bold=True)
     subtitle_font = get_pil_font(28)
     section_font = get_pil_font(32, bold=True)
-    header_font = get_pil_font(27, bold=True)
-    cell_font = get_pil_font(26)
+    header_font = get_pil_font(28, bold=True)
+    cell_font = get_pil_font(27)
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
 
@@ -1472,7 +1472,7 @@ def make_high_res_all_summary_tables_one_page(
     y += 54
 
     table_width = width - margin_x * 2
-    summary_weights = [1.65, 0.70] + [1.08] * 12 + [1.68, 1.45]
+    summary_weights = [1.22, 0.70] + [1.24] * 12 + [1.85, 1.65]
 
     # Three yearly summary tables must share one A4 page with KPI.
     # Keep values readable while fitting all required tables.
@@ -1715,8 +1715,8 @@ def _reportlab_summary_table_with_rotated_year(
     summary_df: pd.DataFrame,
     year: int,
     col_widths: list[float],
-    font_size: float = 7.6,
-    header_font_size: float = 7.9,
+    font_size: float = 8.0,
+    header_font_size: float = 8.3,
 ):
     """Create full-year summary table with a merged rotated Year column.
 
@@ -1898,11 +1898,9 @@ def make_printable_selected_report_pdf_bytes(
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 2))
 
-    summary_widths = [0.78 * inch, 0.42 * inch] + [0.48 * inch] * 12 + [0.68 * inch, 0.58 * inch]
-
     # Three summary tables. Year labels are merged into the left side of each table
     # to save vertical space and allow larger cell font/column widths.
-    summary_widths = [0.36 * inch, 0.86 * inch, 0.43 * inch] + [0.50 * inch] * 12 + [0.72 * inch, 0.62 * inch]
+    summary_widths = [0.34 * inch, 0.66 * inch, 0.38 * inch] + [0.58 * inch] * 12 + [0.86 * inch, 0.76 * inch]
 
     for year in [2026, 2025, 2024]:
         if year in summary_by_year:
@@ -1910,8 +1908,8 @@ def make_printable_selected_report_pdf_bytes(
                 summary_by_year[year],
                 year,
                 col_widths=summary_widths,
-                font_size=7.6,
-                header_font_size=7.9,
+                font_size=8.0,
+                header_font_size=8.3,
             ))
         else:
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
@@ -2317,7 +2315,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v14_rotated_year_summary_tables"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v15_wider_months_narrow_metric"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2388,7 +2386,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v14_rotated_year_summary_tables"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v15_wider_months_narrow_metric"
 
 for state_key in [
     "report_cache_key",
