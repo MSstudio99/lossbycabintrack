@@ -1897,6 +1897,17 @@ def make_printable_selected_report_pdf_bytes(
         alignment=1,
     )
 
+    # PDF TOP-RIGHT PROVINCE/CABIN BOX - edit fontSize here if you want it bigger/smaller.
+    top_right_info_style = ParagraphStyle(
+        "TopRightProvinceCabinBox",
+        parent=styles["BodyText"],
+        fontSize=12.5,
+        leading=14,
+        textColor=colors.HexColor("#0f172a"),
+        alignment=2,
+        spaceAfter=2,
+    )
+
     def _pdf_inline_safe(value) -> str:
         text = "-" if value is None or str(value).strip() == "" else str(value).strip()
         return (
@@ -1906,16 +1917,22 @@ def make_printable_selected_report_pdf_bytes(
             .replace(">", "&gt;")
         )
 
+    # PDF SUBTITLE - Province and Cabin are intentionally removed because they are shown at top-right.
     subtitle = (
-        f"Province: {_pdf_inline_safe(province)} | "
         f"Region: {_pdf_inline_safe(region_name)} | "
-        f"Cabin: <b>{_pdf_inline_safe(cabin_name)}</b> | "
         f"Type: {_pdf_inline_safe(cabin_type)} | "
         f"Ranking month: {_pdf_inline_safe(ranking_month)} {LATEST_YEAR}"
     )
     story = []
 
+    # PDF TOP-RIGHT PROVINCE/CABIN VALUE - bold and right aligned.
+    top_right_info = (
+        f"<b>Province: {_pdf_inline_safe(province)}</b><br/>"
+        f"<b>Cabin: {_pdf_inline_safe(cabin_name)}</b>"
+    )
+
     # Page 1 - all yearly summaries together, with KPI and note below.
+    story.append(Paragraph(top_right_info, top_right_info_style))
     story.append(Paragraph("Summary Tables — 2026, 2025, 2024", h1_style))
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 2))
@@ -1930,6 +1947,7 @@ def make_printable_selected_report_pdf_bytes(
                 summary_by_year[year],
                 year,
                 col_widths=summary_widths,
+                # PDF SUMMARY TABLE CELL FONT SIZE - edit these two values later if needed.
                 font_size=8.0,
                 header_font_size=8.3,
             ))
@@ -2342,7 +2360,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v16_region_bold_cabin_thin_black_grid"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v17_top_right_province_cabin"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2413,7 +2431,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v16_region_bold_cabin_thin_black_grid"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v17_top_right_province_cabin"
 
 for state_key in [
     "report_cache_key",
