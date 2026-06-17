@@ -1704,6 +1704,7 @@ def _reportlab_summary_table_with_rotated_year(
     col_widths: list[float],
     font_size: float = 8.0,
     header_font_size: float = 8.3,
+    unit_font_size: float = 6.6,
 ):
     """Create full-year summary table with a merged rotated Year column.
 
@@ -1763,6 +1764,9 @@ def _reportlab_summary_table_with_rotated_year(
         ("FONTSIZE", (1, 0), (-1, 0), header_font_size),
         ("FONTNAME", (1, 1), (-1, -1), "Helvetica"),
         ("FONTSIZE", (1, 1), (-1, -1), font_size),
+        # PDF UNIT COLUMN VALUE FONT SIZE - edit unit_font_size in the function call below.
+        # Column index 2 is Unit; rows 1 to end are the kWh/% body values.
+        ("FONTSIZE", (2, 1), (2, -1), unit_font_size),
         ("LEADING", (1, 0), (-1, -1), font_size + 2.4),
         ("ALIGN", (1, 0), (-1, 0), "CENTER"),
         ("ALIGN", (1, 1), (1, -1), "LEFT"),
@@ -1922,9 +1926,11 @@ def make_printable_selected_report_pdf_bytes(
                 summary_by_year[year],
                 year,
                 col_widths=summary_widths,
-                # PDF SUMMARY TABLE CELL FONT SIZE - edit these two values later if needed.
+                # PDF SUMMARY TABLE CELL FONT SIZE - edit these values later if needed.
                 font_size=8.0,
                 header_font_size=8.3,
+                # PDF UNIT COLUMN VALUE FONT SIZE - only changes kWh/% values in the Unit column.
+                unit_font_size=6.6,
             ))
         else:
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
@@ -2335,7 +2341,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v18_gap_color_only"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v19_smaller_unit_column_values"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2406,7 +2412,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v18_gap_color_only"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v19_smaller_unit_column_values"
 
 for state_key in [
     "report_cache_key",
