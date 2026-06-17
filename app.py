@@ -1456,8 +1456,8 @@ def make_high_res_all_summary_tables_one_page(
     title_font = get_pil_font(56, bold=True)
     subtitle_font = get_pil_font(28)
     section_font = get_pil_font(32, bold=True)
-    header_font = get_pil_font(25, bold=True)
-    cell_font = get_pil_font(24)
+    header_font = get_pil_font(27, bold=True)
+    cell_font = get_pil_font(26)
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
 
@@ -1472,33 +1472,69 @@ def make_high_res_all_summary_tables_one_page(
     y += 54
 
     table_width = width - margin_x * 2
-    summary_weights = [1.45, 0.62] + [1.0] * 12 + [1.55, 1.35]
+    summary_weights = [1.65, 0.70] + [1.08] * 12 + [1.68, 1.45]
 
     # Three yearly summary tables must share one A4 page with KPI.
     # Keep values readable while fitting all required tables.
-    summary_row_h = 88
+    summary_row_h = 96
+    def _draw_summary_table_with_year_column(year: int, display_df: pd.DataFrame, y_pos: int) -> int:
+        year_col_w = 86
+        table_x = margin_x
+        data_x = table_x + year_col_w
+        data_w = table_width - year_col_w
+        y_start = y_pos
+
+        # Draw data table first.
+        y_end = draw_table_on_image(
+            draw,
+            display_df,
+            data_x,
+            y_pos,
+            data_w,
+            summary_row_h,
+            header_font,
+            cell_font,
+            col_weights=summary_weights,
+        )
+
+        # Draw merged year column.
+        draw.rectangle(
+            [table_x, y_start, table_x + year_col_w, y_end],
+            fill="#e2e8f0",
+            outline="#94a3b8",
+            width=3,
+        )
+
+        # Rotated year text.
+        year_text = str(year)
+        year_font = get_pil_font(44, bold=True)
+        temp = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
+        temp_draw = ImageDraw.Draw(temp)
+        bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        temp_draw.text(((220 - tw) / 2, (90 - th) / 2), year_text, font=year_font, fill="#0f172a")
+        rotated = temp.rotate(90, expand=True)
+        rx = table_x + (year_col_w - rotated.width) // 2
+        ry = y_start + (y_end - y_start - rotated.height) // 2
+        img.paste(rotated, (rx, ry), rotated)
+
+        return y_end
+
+
 
     for year in [2026, 2025, 2024]:
-        draw.text((margin_x, y), f"Summary Table ({year}) - Full Year", font=section_font, fill="#0f172a")
-        y += 38
-
         if year in summary_by_year:
-            y = draw_table_on_image(
-                draw,
+            y = _draw_summary_table_with_year_column(
+                year,
                 _summary_display_full_for_report(summary_by_year[year]),
-                margin_x,
                 y,
-                table_width,
-                summary_row_h,
-                header_font,
-                cell_font,
-                col_weights=summary_weights,
             )
         else:
             draw.text((margin_x, y), f"No {year} data available for this cabin.", font=cell_font, fill="#64748b")
             y += summary_row_h
 
-        y += 18
+        y += 12
 
     # Add Yearly KPI table under the three summaries.
     draw.text((margin_x, y), "Yearly KPI Comparison", font=section_font, fill="#0f172a")
@@ -1673,6 +1709,109 @@ def _pdf_footer(canvas, doc):
     canvas.restoreState()
 
 
+
+
+def _reportlab_summary_table_with_rotated_year(
+    summary_df: pd.DataFrame,
+    year: int,
+    col_widths: list[float],
+    font_size: float = 7.6,
+    header_font_size: float = 7.9,
+):
+    """Create full-year summary table with a merged rotated Year column.
+
+    The separate title 'Summary Table (year) - Full Year' is removed.
+    Instead, the year appears as a vertical merged cell at the far-left side
+    of each table.
+    """
+    from reportlab.lib import colors
+    from reportlab.platypus import Flowable, Table, TableStyle
+
+    class RotatedYearText(Flowable):
+        def __init__(self, text: str, font_name: str = "Helvetica-Bold", font_size: float = 11):
+            super().__init__()
+            self.text = str(text)
+            self.font_name = font_name
+            self.font_size = font_size
+            self.width = 22
+            self.height = 86
+
+        def wrap(self, availWidth, availHeight):
+            self.width = min(availWidth, 24)
+            self.height = min(availHeight, 95)
+            return self.width, self.height
+
+        def draw(self):
+            c = self.canv
+            c.saveState()
+            c.setFillColor(colors.HexColor("#0f172a"))
+            c.setFont(self.font_name, self.font_size)
+            # Rotate upward and center inside the merged year column.
+            c.translate(self.width / 2 + 3, self.height / 2 - 2)
+            c.rotate(90)
+            text_width = c.stringWidth(self.text, self.font_name, self.font_size)
+            c.drawString(-text_width / 2, -self.font_size / 3, self.text)
+            c.restoreState()
+
+    display = _summary_display_full_for_report(summary_df).copy().astype(str)
+    headers = display.columns.astype(str).tolist()
+    rows = display.values.tolist()
+
+    data = [[RotatedYearText(str(year)), *headers]]
+    for row in rows:
+        data.append(["", *[_pdf_cell_text(cell) for cell in row]])
+
+    table = Table(data, colWidths=col_widths, repeatRows=1, hAlign="CENTER")
+
+    style_items = [
+        ("SPAN", (0, 0), (0, -1)),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e2e8f0")),
+        ("BOX", (0, 0), (0, -1), 0.6, colors.HexColor("#94a3b8")),
+        ("VALIGN", (0, 0), (0, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+
+        ("BACKGROUND", (1, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (1, 0), (-1, 0), colors.white),
+        ("FONTNAME", (1, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (1, 0), (-1, 0), header_font_size),
+        ("FONTNAME", (1, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (1, 1), (-1, -1), font_size),
+        ("LEADING", (1, 0), (-1, -1), font_size + 2.4),
+        ("ALIGN", (1, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (1, 1), (1, -1), "LEFT"),
+        ("ALIGN", (2, 1), (2, -1), "CENTER"),
+        ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (1, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 4.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4.5),
+    ]
+
+    # Row colours. Gap row gets a stronger full-row highlight from Metric onward.
+    for row_idx, row in enumerate(data[1:], start=1):
+        metric = str(row[1]).strip().lower() if len(row) > 1 else ""
+        if metric == "sale":
+            bg, fg = "#ecfdf5", "#065f46"
+        elif metric == "total":
+            bg, fg = "#eff6ff", "#1d4ed8"
+        elif metric == "gap":
+            bg, fg = "#ffedd5", "#9a3412"
+            style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), "Helvetica-Bold"))
+        elif metric == "loss %":
+            bg, fg = "#fef2f2", "#b91c1c"
+        else:
+            bg, fg = None, None
+
+        if bg:
+            style_items.append(("BACKGROUND", (1, row_idx), (-1, row_idx), colors.HexColor(bg)))
+        if fg:
+            style_items.append(("TEXTCOLOR", (1, row_idx), (-1, row_idx), colors.HexColor(fg)))
+
+    table.setStyle(TableStyle(style_items))
+    return table
+
 def make_printable_selected_report_pdf_bytes(
     province: str,
     cabin_name: str,
@@ -1757,30 +1896,33 @@ def make_printable_selected_report_pdf_bytes(
     # Page 1 - all yearly summaries together, with KPI and note below.
     story.append(Paragraph("Summary Tables — 2026, 2025, 2024", h1_style))
     story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 3))
+    story.append(Spacer(1, 2))
 
     summary_widths = [0.78 * inch, 0.42 * inch] + [0.48 * inch] * 12 + [0.68 * inch, 0.58 * inch]
 
+    # Three summary tables. Year labels are merged into the left side of each table
+    # to save vertical space and allow larger cell font/column widths.
+    summary_widths = [0.36 * inch, 0.86 * inch, 0.43 * inch] + [0.50 * inch] * 12 + [0.72 * inch, 0.62 * inch]
+
     for year in [2026, 2025, 2024]:
-        story.append(Paragraph(f"Summary Table ({year}) - Full Year", h2_style))
         if year in summary_by_year:
-            story.append(_reportlab_table(
-                _summary_display_full_for_report(summary_by_year[year]),
+            story.append(_reportlab_summary_table_with_rotated_year(
+                summary_by_year[year],
+                year,
                 col_widths=summary_widths,
-                font_size=6.6,
-                header_font_size=6.9,
-                numeric_start_col=2,
+                font_size=7.6,
+                header_font_size=7.9,
             ))
         else:
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
-        story.append(Spacer(1, 2))
+        story.append(Spacer(1, 3))
 
     story.append(Paragraph("Yearly KPI Comparison", h2_style))
     story.append(_reportlab_table(
         format_yearly_kpi_table(yearly_kpi_df),
         col_widths=[0.72 * inch, 1.34 * inch, 1.34 * inch, 1.34 * inch, 1.30 * inch, 1.48 * inch],
-        font_size=7.8,
-        header_font_size=8.2,
+        font_size=7.7,
+        header_font_size=8.1,
         numeric_start_col=1,
     ))
     story.append(Spacer(1, 2))
@@ -2175,7 +2317,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_subtitle_note"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v14_rotated_year_summary_tables"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2246,7 +2388,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_subtitle_note"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v14_rotated_year_summary_tables"
 
 for state_key in [
     "report_cache_key",
