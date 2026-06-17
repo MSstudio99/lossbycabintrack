@@ -1461,9 +1461,14 @@ def make_high_res_all_summary_tables_one_page(
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
 
+    def _draw_center_line(y_pos: int, line_text: str, font, fill: str):
+        bbox = draw.textbbox((0, 0), line_text, font=font)
+        tw = bbox[2] - bbox[0]
+        draw.text(((width - tw) / 2, y_pos), line_text, font=font, fill=fill)
+
     draw.text((margin_x, y), "Summary Tables — 2026, 2025, 2024", font=title_font, fill="#0f172a")
     y += 68
-    draw.text((margin_x, y), subtitle[:190], font=subtitle_font, fill="#475569")
+    _draw_center_line(y, subtitle[:190], subtitle_font, "#475569")
     y += 54
 
     table_width = width - margin_x * 2
@@ -1511,11 +1516,11 @@ def make_high_res_all_summary_tables_one_page(
         col_weights=[0.85, 1.45, 1.45, 1.45, 1.35, 1.55],
     )
 
-    draw.text(
-        (margin_x, height - 34),
+    _draw_center_line(
+        height - 34,
         "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
-        font=get_pil_font(20),
-        fill="#64748b",
+        get_pil_font(20),
+        "#64748b",
     )
 
     return img
@@ -1743,6 +1748,7 @@ def make_printable_selected_report_pdf_bytes(
         fontSize=9.0,
         leading=11,
         textColor=colors.HexColor("#475569"),
+        alignment=1,
     )
 
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
@@ -2169,7 +2175,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_tables_gap_row_color"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_subtitle_note"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2240,7 +2246,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_tables_gap_row_color"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_subtitle_note"
 
 for state_key in [
     "report_cache_key",
