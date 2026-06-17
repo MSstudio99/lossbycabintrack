@@ -1324,11 +1324,20 @@ def draw_table_on_image(
         else:
             bg, fg, font = "white", "#111827", cell_font
 
-        # Color summary rows by description when the second column is Description.
-        if not is_header and n_cols >= 2:
-            desc = str(row[1]).lower()
-            if desc in ["sale", "total", "total - sale", "losses"]:
-                bg, fg = summary_row_colors(desc)
+        # Color summary rows by metric/description. The full-year report table uses
+        # Metric as the first column, so check both first and second columns.
+        if not is_header:
+            first_label = str(row[0]).strip().lower() if n_cols >= 1 else ""
+            second_label = str(row[1]).strip().lower() if n_cols >= 2 else ""
+            labels = {first_label, second_label}
+            if "gap" in labels or "total - sale" in labels:
+                bg, fg, font = "#ffedd5", "#9a3412", get_pil_font(max(18, cell_font.size), bold=True) if hasattr(cell_font, "size") else font
+            elif "sale" in labels:
+                bg, fg = "#ecfdf5", "#065f46"
+            elif "total" in labels:
+                bg, fg = "#eff6ff", "#1d4ed8"
+            elif "loss %" in labels or "losses" in labels:
+                bg, fg = "#fef2f2", "#b91c1c"
 
         for c_idx, cell in enumerate(row):
             cw = col_widths[c_idx]
@@ -1572,7 +1581,7 @@ def _reportlab_table(
     data = [clean_df.columns.astype(str).tolist()] + clean_df.values.tolist()
     data = [[_pdf_cell_text(cell) for cell in row] for row in data]
 
-    table = Table(data, colWidths=col_widths, repeatRows=1, hAlign="LEFT")
+    table = Table(data, colWidths=col_widths, repeatRows=1, hAlign="CENTER")
     style_items = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -1594,17 +1603,24 @@ def _reportlab_table(
     ]
 
     # Light semantic row colors for summary tables.
+    # The compact full-year summary table uses Metric as the first column
+    # (Sale, Total, Gap, Loss %), so check both first and second columns.
     for row_idx, row in enumerate(data[1:], start=1):
-        desc = str(row[1]).lower() if len(row) > 1 else ""
-        if desc == "sale":
+        first = str(row[0]).strip().lower() if len(row) > 0 else ""
+        second = str(row[1]).strip().lower() if len(row) > 1 else ""
+        labels = {first, second}
+
+        if "sale" in labels:
             bg, fg = "#ecfdf5", "#065f46"
-        elif desc == "total":
+        elif "total" in labels:
             bg, fg = "#eff6ff", "#1d4ed8"
-        elif desc == "total - sale":
-            bg, fg = "#fff7ed", "#c2410c"
-        elif desc == "losses":
+        elif "gap" in labels or "total - sale" in labels:
+            # Stronger full-row highlight for the Gap row.
+            bg, fg = "#ffedd5", "#9a3412"
+            style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
+        elif "loss %" in labels or "losses" in labels:
             bg, fg = "#fef2f2", "#b91c1c"
-        elif str(row[0]).lower().startswith("weighted") or str(row[0]).lower().startswith("average"):
+        elif first.startswith("weighted") or first.startswith("average"):
             bg, fg = "#f8fafc", "#0f172a"
             style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
         else:
@@ -1708,6 +1724,7 @@ def make_printable_selected_report_pdf_bytes(
         textColor=colors.HexColor("#0f172a"),
         spaceBefore=3,
         spaceAfter=7,
+        alignment=1,
     )
     h2_style = ParagraphStyle(
         "ReportH2A4LandscapeClear",
@@ -1718,6 +1735,7 @@ def make_printable_selected_report_pdf_bytes(
         textColor=colors.HexColor("#0f172a"),
         spaceBefore=5,
         spaceAfter=6,
+        alignment=1,
     )
     small_style = ParagraphStyle(
         "SmallA4LandscapeClear",
@@ -2151,7 +2169,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v12_summary_only_pdf_download_in_rank_area"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_tables_gap_row_color"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2222,7 +2240,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v12_summary_only_pdf_download_in_rank_area"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v13_center_tables_gap_row_color"
 
 for state_key in [
     "report_cache_key",
