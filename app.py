@@ -620,14 +620,9 @@ def catmull_rom_spline(points, samples_per_segment=18):
 
 def summary_row_colors(desc: str):
     d = str(desc).lower()
-    if d == "sale":
-        return "#ecfdf5", "#065f46"
-    if d == "total":
-        return "#eff6ff", "#1d4ed8"
-    if d == "total - sale":
+    # Only Gap / total - sale keeps row color. Sale, Total, and Loss % stay plain.
+    if d == "total - sale" or d == "gap":
         return "#fff7ed", "#c2410c"
-    if d == "losses":
-        return "#fef2f2", "#b91c1c"
     return "white", "#111827"
 
 
@@ -1330,20 +1325,14 @@ def draw_table_on_image(
         else:
             bg, fg, font = "white", "#111827", cell_font
 
-        # Color summary rows by metric/description. The full-year report table uses
-        # Metric as the first column, so check both first and second columns.
+        # Color summary rows by metric/description.
+        # Only Gap is highlighted; Sale, Total, and Loss % stay plain.
         if not is_header:
             first_label = str(row[0]).strip().lower() if n_cols >= 1 else ""
             second_label = str(row[1]).strip().lower() if n_cols >= 2 else ""
             labels = {first_label, second_label}
             if "gap" in labels or "total - sale" in labels:
                 bg, fg, font = "#ffedd5", "#9a3412", get_pil_font(max(18, cell_font.size), bold=True) if hasattr(cell_font, "size") else font
-            elif "sale" in labels:
-                bg, fg = "#ecfdf5", "#065f46"
-            elif "total" in labels:
-                bg, fg = "#eff6ff", "#1d4ed8"
-            elif "loss %" in labels or "losses" in labels:
-                bg, fg = "#fef2f2", "#b91c1c"
 
         for c_idx, cell in enumerate(row):
             cw = col_widths[c_idx]
@@ -1649,24 +1638,16 @@ def _reportlab_table(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]
 
-    # Light semantic row colors for summary tables.
-    # The compact full-year summary table uses Metric as the first column
-    # (Sale, Total, Gap, Loss %), so check both first and second columns.
+    # Light semantic row colors. Only Gap is highlighted.
+    # Sale, Total, and Loss % stay plain.
     for row_idx, row in enumerate(data[1:], start=1):
         first = str(row[0]).strip().lower() if len(row) > 0 else ""
         second = str(row[1]).strip().lower() if len(row) > 1 else ""
         labels = {first, second}
 
-        if "sale" in labels:
-            bg, fg = "#ecfdf5", "#065f46"
-        elif "total" in labels:
-            bg, fg = "#eff6ff", "#1d4ed8"
-        elif "gap" in labels or "total - sale" in labels:
-            # Stronger full-row highlight for the Gap row.
+        if "gap" in labels or "total - sale" in labels:
             bg, fg = "#ffedd5", "#9a3412"
             style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
-        elif "loss %" in labels or "losses" in labels:
-            bg, fg = "#fef2f2", "#b91c1c"
         elif first.startswith("weighted") or first.startswith("average"):
             bg, fg = "#f8fafc", "#0f172a"
             style_items.append(("FONTNAME", (0, row_idx), (-1, row_idx), "Helvetica-Bold"))
@@ -1795,7 +1776,7 @@ def _reportlab_summary_table_with_rotated_year(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4.5),
     ]
 
-    # Row colours. Gap row gets a stronger full-row highlight from Metric onward.
+    # Row colours. Only the Gap row is highlighted; Sale, Total, and Loss % stay plain.
     for row_idx, row in enumerate(data[1:], start=1):
         metric = str(row[1]).strip().lower() if len(row) > 1 else ""
         if metric == "gap":
@@ -2354,7 +2335,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v17_top_right_province_cabin"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v18_gap_color_only"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2425,7 +2406,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v17_top_right_province_cabin"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v18_gap_color_only"
 
 for state_key in [
     "report_cache_key",
