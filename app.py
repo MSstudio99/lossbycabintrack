@@ -1799,10 +1799,10 @@ def _reportlab_summary_table_with_rotated_year(
     for row_idx, row in enumerate(data[1:], start=1):
         metric = str(row[1]).strip().lower() if len(row) > 1 else ""
         if metric == "gap":
-        bg, fg = "#ffedd5", "#9a3412"
-        style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), "Helvetica-Bold"))
-    else:
-        bg, fg = None, None
+            bg, fg = "#ffedd5", "#9a3412"
+            style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), "Helvetica-Bold"))
+        else:
+            bg, fg = None, None
 
         if bg:
             style_items.append(("BACKGROUND", (1, row_idx), (-1, row_idx), colors.HexColor(bg)))
