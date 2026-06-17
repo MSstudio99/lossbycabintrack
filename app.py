@@ -50,8 +50,8 @@ MONTH_FULL_LIST = list(MONTH_MAP.values())
 #
 # Do not change the font names below unless you also change the registered names
 # inside register_pdf_fonts().
-PDF_KHMER_REGULAR_FONT_PATH = Path("fonts/NotoSansKhmer-Regular.ttf")
-PDF_KHMER_BOLD_FONT_PATH = Path("fonts/NotoSansKhmer-Bold.ttf")
+PDF_KHMER_REGULAR_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
+PDF_KHMER_BOLD_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
 
 # Change these strings to Khmer whenever needed.
 PDF_MAIN_TITLE_TEXT = "តារាងសង្ខេប — 2026, 2025, 2024"
