@@ -54,6 +54,7 @@ PDF_KHMER_REGULAR_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
 PDF_KHMER_BOLD_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
 
 # Change these strings to Khmer whenever needed.
+# PDF KHMER TITLE TEXT - rendered as PNG image in the PDF to keep Khmer glyphs combined.
 PDF_MAIN_TITLE_TEXT = "តារាងសង្ខេប — 2026, 2025, 2024"
 PDF_KPI_TITLE_TEXT = "ការប្រៀបធៀប KPI ប្រចាំឆ្នាំ"
 
@@ -1856,6 +1857,89 @@ def _reportlab_summary_table_with_rotated_year(
     table.setStyle(TableStyle(style_items))
     return table
 
+
+
+def get_pdf_khmer_image_font(font_path: Path, font_size: int):
+    """Load Khmer font for image rendering, preferring RAQM shaping if available."""
+    if font_path.exists():
+        try:
+            # RAQM gives better complex-text shaping when Pillow/libraqm supports it.
+            return ImageFont.truetype(
+                str(font_path),
+                font_size,
+                layout_engine=ImageFont.Layout.RAQM,
+            )
+        except Exception:
+            return ImageFont.truetype(str(font_path), font_size)
+
+    # Fallback only. Khmer may not render correctly until the font file exists.
+    return get_pil_font(font_size, bold=True)
+
+
+def make_pdf_khmer_title_image_flowable(
+    text: str,
+    font_size: int,
+    max_width_pt: float,
+    bold: bool = True,
+    align: str = "center",
+):
+    """Render Khmer title text as a high-resolution image for ReportLab PDF.
+
+    ReportLab can embed Khmer fonts but does not reliably shape Khmer complex text.
+    Rendering the Khmer title as an image avoids broken vowel/subscript combining.
+    """
+    from reportlab.platypus import Image as RLImage
+
+    font_path = PDF_KHMER_BOLD_FONT_PATH if bold else PDF_KHMER_REGULAR_FONT_PATH
+    if not font_path.exists():
+        font_path = PDF_KHMER_REGULAR_FONT_PATH
+
+    font = get_pdf_khmer_image_font(font_path, font_size)
+
+    padding_x = 28
+    padding_y = 16
+
+    probe = Image.new("RGBA", (20, 20), (255, 255, 255, 0))
+    probe_draw = ImageDraw.Draw(probe)
+    bbox = probe_draw.textbbox((0, 0), text, font=font)
+    text_w = max(1, bbox[2] - bbox[0])
+    text_h = max(1, bbox[3] - bbox[1])
+
+    img_w = text_w + padding_x * 2
+    img_h = text_h + padding_y * 2
+
+    img = Image.new("RGBA", (img_w, img_h), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+
+    if align == "right":
+        x = img_w - padding_x - text_w
+    elif align == "left":
+        x = padding_x
+    else:
+        x = (img_w - text_w) / 2
+
+    draw.text((x, padding_y - bbox[1]), text, font=font, fill="#0f172a")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True, dpi=(300, 300))
+    buf.seek(0)
+
+    natural_w_pt = img_w * 72 / 300
+    natural_h_pt = img_h * 72 / 300
+
+    draw_w = min(max_width_pt, natural_w_pt)
+    draw_h = natural_h_pt * (draw_w / natural_w_pt)
+
+    flowable = RLImage(buf, width=draw_w, height=draw_h)
+    if align == "right":
+        flowable.hAlign = "RIGHT"
+    elif align == "left":
+        flowable.hAlign = "LEFT"
+    else:
+        flowable.hAlign = "CENTER"
+
+    return flowable
+
 def make_printable_selected_report_pdf_bytes(
     province: str,
     cabin_name: str,
@@ -1873,7 +1957,7 @@ def make_printable_selected_report_pdf_bytes(
         from reportlab.lib.pagesizes import A4, landscape
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
     except Exception as exc:
         raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
 
@@ -1975,7 +2059,14 @@ def make_printable_selected_report_pdf_bytes(
 
     # Page 1 - all yearly summaries together, with KPI and note below.
     story.append(Paragraph(top_right_info, top_right_info_style))
-    story.append(Paragraph(PDF_MAIN_TITLE_TEXT, h1_style))
+    # Khmer main title is rendered as image to keep Khmer characters combined correctly.
+    story.append(make_pdf_khmer_title_image_flowable(
+        PDF_MAIN_TITLE_TEXT,
+        font_size=42,
+        max_width_pt=usable_w,
+        bold=True,
+        align="center",
+    ))
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 2))
 
@@ -1999,7 +2090,14 @@ def make_printable_selected_report_pdf_bytes(
             story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
         story.append(Spacer(1, 3))
 
-    story.append(Paragraph(PDF_KPI_TITLE_TEXT, h2_style))
+    # Khmer KPI title is rendered as image to keep Khmer characters combined correctly.
+    story.append(make_pdf_khmer_title_image_flowable(
+        PDF_KPI_TITLE_TEXT,
+        font_size=30,
+        max_width_pt=usable_w,
+        bold=True,
+        align="center",
+    ))
     story.append(_reportlab_table(
         format_yearly_kpi_table(yearly_kpi_df),
         col_widths=[0.72 * inch, 1.34 * inch, 1.34 * inch, 1.34 * inch, 1.30 * inch, 1.48 * inch],
@@ -2404,7 +2502,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v20_khmer_pdf_titles"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v21_khmer_title_image_fix"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2475,7 +2573,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v20_khmer_pdf_titles"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v21_khmer_title_image_fix"
 
 for state_key in [
     "report_cache_key",
