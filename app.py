@@ -1918,7 +1918,7 @@ def make_printable_selected_report_pdf_bytes(
 
     # Three summary tables. Year labels are merged into the left side of each table
     # to save vertical space and allow larger cell font/column widths.
-    summary_widths = [0.34 * inch, 0.66 * inch, 0.38 * inch] + [0.58 * inch] * 12 + [0.86 * inch, 0.76 * inch]
+    summary_widths = [0.29 * inch, 0.66 * inch, 0.38 * inch] + [0.58 * inch] * 12 + [0.86 * inch, 0.76 * inch]
 
     for year in [2026, 2025, 2024]:
         if year in summary_by_year:
