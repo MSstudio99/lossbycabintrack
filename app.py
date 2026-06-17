@@ -1527,18 +1527,7 @@ def build_high_res_png_pages_zip_bytes(
 
     pages: list[tuple[str, Image.Image]] = []
     pages.append((
-        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Monthly_Loss_Comparison_A4_Landscape_300DPI.png"),
-        make_high_res_table_page(
-            format_loss_comparison_table(loss_compare_df),
-            title="Monthly Loss % Comparison",
-            subtitle=subtitle,
-            col_weights=[1.7, 1.0, 1.0, 1.0],
-            row_h=110,
-        ),
-    ))
-
-    pages.append((
-        safe_filename(f"02_{province}_Cabin_{safe_cabin}_Summary_2026_2025_2024_A4_Landscape_300DPI.png"),
+        safe_filename(f"01_{province}_Cabin_{safe_cabin}_Summary_2026_2025_2024_A4_Landscape_300DPI.png"),
         make_high_res_all_summary_tables_one_page(
             province=province,
             cabin_name=cabin_name,
@@ -1673,7 +1662,7 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build an A4 landscape PDF with KPI, monthly comparison, and yearly summary tables only."""
+    """Build an A4 landscape PDF with summary tables, KPI, and note only."""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
@@ -1741,20 +1730,7 @@ def make_printable_selected_report_pdf_bytes(
     subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
     story = []
 
-    # Page 1 - monthly comparison. The old KPI-only first page was removed.
-    story.append(Paragraph("Monthly Loss % Comparison", h1_style))
-    story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 6))
-    story.append(_reportlab_table(
-        format_loss_comparison_table(loss_compare_df),
-        col_widths=[2.25 * inch, 1.55 * inch, 1.55 * inch, 1.55 * inch],
-        font_size=10.2,
-        header_font_size=10.6,
-        numeric_start_col=1,
-    ))
-
-    # Page 2 - all yearly summaries together on one landscape page, with KPI and note below.
-    story.append(PageBreak())
+    # Page 1 - all yearly summaries together, with KPI and note below.
     story.append(Paragraph("Summary Tables — 2026, 2025, 2024", h1_style))
     story.append(Paragraph(subtitle, small_style))
     story.append(Spacer(1, 3))
@@ -2174,22 +2150,31 @@ with summary_control_col:
                 st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
                 st.rerun()
 
-        ranking_position_choice = st.number_input(
-            "Ranking position",
-            min_value=1,
-            max_value=max(1, len(browse_keys)),
-            value=min(max(current_pos + 1, 1), max(1, len(browse_keys))),
-            step=1,
-            help="This position follows the current visible ranking table, not the full cabin list.",
-            key=f"summary_ranking_position_{province}_{ranking_month}_{top_n_choice}_{selected_cabin_key}",
+        # PDF report download is placed here instead of the old Ranking position control.
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v12_summary_only_pdf_download_in_rank_area"
+        ranking_area_pdf_ready = (
+            st.session_state.get("report_cache_key") == ranking_area_report_key
+            and st.session_state.get("report_pdf_bytes")
         )
+        safe_cabin_name_rank = safe_filename(resolved_name)
 
-        if st.button("Open ranking position", key=f"summary_open_ranking_position_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
-            target_key = browse_keys[int(ranking_position_choice) - 1]
-            target_row = get_row_from_meta(meta_2026_indexed, target_key)
-            if target_row is not None:
-                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
-                st.rerun()
+        if ranking_area_pdf_ready:
+            st.download_button(
+                "Download PDF report",
+                data=st.session_state["report_pdf_bytes"],
+                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name_rank}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+                key=f"summary_download_pdf_report_{province}_{ranking_month}_{selected_cabin_key}",
+            )
+        else:
+            st.button(
+                "Download PDF report",
+                disabled=True,
+                help="Click Build print-ready report below first, then this download button will become active.",
+                use_container_width=True,
+                key=f"summary_download_pdf_report_disabled_{province}_{ranking_month}_{selected_cabin_key}",
+            )
 
         ranked_choice_key = st.selectbox(
             "Choose visible ranked cabin",
@@ -2237,7 +2222,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v11_no_kpi_first_page_note_same_page"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v12_summary_only_pdf_download_in_rank_area"
 
 for state_key in [
     "report_cache_key",
@@ -2320,6 +2305,9 @@ if st.button("Build print-ready report", type="primary"):
             st.session_state["report_png_pages_zip_bytes"] = png_pages_zip
             st.session_state["report_package_zip_bytes"] = report_package_zip
 
+            # Rerun immediately so the moved PDF download button in the ranking panel becomes active.
+            st.rerun()
+
     except Exception as exc:
         st.session_state["report_export_error"] = (
             "Could not build the print-ready export. "
@@ -2335,52 +2323,25 @@ if st.session_state.get("report_export_warning"):
 
 if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_png_pages_zip_bytes"):
     safe_cabin_name = safe_filename(resolved_name)
-    st.success("Print-ready export is ready.")
+    st.success("Print-ready export is ready. The PDF report download button is now available in the Browse ranked cabins panel.")
 
-    if st.session_state.get("report_pdf_bytes"):
-        col_pdf, col_png, col_zip = st.columns(3)
-        with col_pdf:
-            st.download_button(
-                "Download PDF report",
-                data=st.session_state["report_pdf_bytes"],
-                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
-                mime="application/pdf",
-                use_container_width=True,
-            )
-        with col_png:
-            st.download_button(
-                "Download A4 PNG pages ZIP",
-                data=st.session_state["report_png_pages_zip_bytes"],
-                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
-                mime="application/zip",
-                use_container_width=True,
-            )
-        with col_zip:
-            st.download_button(
-                "Download PDF/PNG + CSV package",
-                data=st.session_state["report_package_zip_bytes"],
-                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_print_package.zip"),
-                mime="application/zip",
-                use_container_width=True,
-            )
-    else:
-        col_png, col_zip = st.columns(2)
-        with col_png:
-            st.download_button(
-                "Download A4 PNG pages ZIP",
-                data=st.session_state["report_png_pages_zip_bytes"],
-                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
-                mime="application/zip",
-                use_container_width=True,
-            )
-        with col_zip:
-            st.download_button(
-                "Download PNG + CSV package",
-                data=st.session_state["report_package_zip_bytes"],
-                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_png_csv_package.zip"),
-                mime="application/zip",
-                use_container_width=True,
-            )
+    col_png, col_zip = st.columns(2)
+    with col_png:
+        st.download_button(
+            "Download A4 PNG pages ZIP",
+            data=st.session_state["report_png_pages_zip_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
+            mime="application/zip",
+            use_container_width=True,
+        )
+    with col_zip:
+        st.download_button(
+            "Download report package ZIP",
+            data=st.session_state["report_package_zip_bytes"],
+            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_report_package.zip"),
+            mime="application/zip",
+            use_container_width=True,
+        )
 
 with st.expander("Why the old single PNG export was replaced"):
     st.write(
