@@ -1798,17 +1798,11 @@ def _reportlab_summary_table_with_rotated_year(
     # Row colours. Gap row gets a stronger full-row highlight from Metric onward.
     for row_idx, row in enumerate(data[1:], start=1):
         metric = str(row[1]).strip().lower() if len(row) > 1 else ""
-        if metric == "sale":
-            bg, fg = "#ecfdf5", "#065f46"
-        elif metric == "total":
-            bg, fg = "#eff6ff", "#1d4ed8"
-        elif metric == "gap":
-            bg, fg = "#ffedd5", "#9a3412"
-            style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), "Helvetica-Bold"))
-        elif metric == "loss %":
-            bg, fg = "#fef2f2", "#b91c1c"
-        else:
-            bg, fg = None, None
+        if metric == "gap":
+    bg, fg = "#ffedd5", "#9a3412"
+    style_items.append(("FONTNAME", (1, row_idx), (-1, row_idx), "Helvetica-Bold"))
+else:
+    bg, fg = None, None
 
         if bg:
             style_items.append(("BACKGROUND", (1, row_idx), (-1, row_idx), colors.HexColor(bg)))
