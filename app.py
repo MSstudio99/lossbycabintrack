@@ -226,6 +226,11 @@ def prepare_raw_dataframe(raw: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     else:
         df["Cabin"] = ""
 
+    if "Region" in df.columns:
+        df["Region"] = df["Region"].apply(normalize_text)
+    else:
+        df["Region"] = ""
+
     df["__cabin_key"] = df["Cabin"].apply(normalize_key)
     df["__display_name"] = df["Cabin"]
 
@@ -242,7 +247,7 @@ def prepare_raw_dataframe(raw: pd.DataFrame) -> Dict[str, pd.DataFrame]:
 
     if valid_df.empty:
         cabin_meta = pd.DataFrame(columns=[
-            "__cabin_key", "Cabin", "display_name", "customers", "rows", "type",
+            "__cabin_key", "Cabin", "display_name", "region", "customers", "rows", "type",
             *[f"{m}_total" for m in MONTHS],
             *[f"{m}_sale" for m in MONTHS],
         ])
@@ -250,6 +255,7 @@ def prepare_raw_dataframe(raw: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         cabin_meta = valid_df.groupby("__cabin_key", as_index=False).agg(
             Cabin=("Cabin", "first"),
             display_name=("__display_name", "first"),
+            region=("Region", "first"),
             customers=("__consumer_value", "sum"),
             rows=("__cabin_key", "size"),
             **monthly_total_aggs,
@@ -1636,7 +1642,7 @@ def _reportlab_table(
         ("ALIGN", (1, 1), (1, -1), "LEFT"),
         ("ALIGN", (numeric_start_col, 1), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+        ("GRID", (0, 0), (-1, -1), 0.20, colors.black),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -1766,7 +1772,7 @@ def _reportlab_summary_table_with_rotated_year(
     style_items = [
         ("SPAN", (0, 0), (0, -1)),
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e2e8f0")),
-        ("BOX", (0, 0), (0, -1), 0.6, colors.HexColor("#94a3b8")),
+        ("BOX", (0, 0), (0, -1), 0.25, colors.black),
         ("VALIGN", (0, 0), (0, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (0, -1), "CENTER"),
 
@@ -1782,7 +1788,7 @@ def _reportlab_summary_table_with_rotated_year(
         ("ALIGN", (2, 1), (2, -1), "CENTER"),
         ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
         ("VALIGN", (1, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+        ("GRID", (0, 0), (-1, -1), 0.20, colors.black),
         ("LEFTPADDING", (0, 0), (-1, -1), 3),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ("TOPPADDING", (0, 0), (-1, -1), 4.5),
@@ -1815,6 +1821,7 @@ def _reportlab_summary_table_with_rotated_year(
 def make_printable_selected_report_pdf_bytes(
     province: str,
     cabin_name: str,
+    region_name: str,
     cabin_type: str,
     ranking_month: str,
     summary_by_year: Dict[int, pd.DataFrame],
@@ -1890,7 +1897,22 @@ def make_printable_selected_report_pdf_bytes(
         alignment=1,
     )
 
-    subtitle = f"Province: {province} | Cabin: {cabin_name} | Type: {cabin_type} | Ranking month: {ranking_month} {LATEST_YEAR}"
+    def _pdf_inline_safe(value) -> str:
+        text = "-" if value is None or str(value).strip() == "" else str(value).strip()
+        return (
+            text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    subtitle = (
+        f"Province: {_pdf_inline_safe(province)} | "
+        f"Region: {_pdf_inline_safe(region_name)} | "
+        f"Cabin: <b>{_pdf_inline_safe(cabin_name)}</b> | "
+        f"Type: {_pdf_inline_safe(cabin_type)} | "
+        f"Ranking month: {_pdf_inline_safe(ranking_month)} {LATEST_YEAR}"
+    )
     story = []
 
     # Page 1 - all yearly summaries together, with KPI and note below.
@@ -2212,6 +2234,10 @@ if selected_row is None:
     st.stop()
 
 resolved_name = selected_row["display_name"]
+resolved_region = normalize_text(selected_row.get("region", ""))
+if resolved_region == "":
+    resolved_region = normalize_text(selected_row.get("Region", ""))
+
 
 summary_by_year, loss_by_year, meta_by_year, status_by_year = get_summary_and_loss_for_cabin(
     year_sources=year_sources,
@@ -2228,12 +2254,13 @@ loss_compare_df = build_loss_comparison_table(summary_by_year, loss_by_year)
 # Selected cabin overview
 # ---------------------------------------------------------
 st.subheader(f"Selected Cabin Overview — {province} | Cabin {resolved_name}")
-cols = st.columns(5)
+cols = st.columns(6)
 cols[0].metric("Province", province)
-cols[1].metric("Cabin", resolved_name)
-cols[2].metric("Cabin Type", selected_row["type"])
-cols[3].metric("Matched Rows", int(selected_row["rows"]))
-cols[4].metric("Customers", int(selected_row["customers"]))
+cols[1].metric("Region", resolved_region if resolved_region else "-")
+cols[2].metric("Cabin", resolved_name)
+cols[3].metric("Cabin Type", selected_row["type"])
+cols[4].metric("Matched Rows", int(selected_row["rows"]))
+cols[5].metric("Customers", int(selected_row["customers"]))
 
 for year in [2025, 2024]:
     if status_by_year.get(year) != "OK":
@@ -2315,7 +2342,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v15_wider_months_narrow_metric"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v16_region_bold_cabin_thin_black_grid"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2386,7 +2413,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v15_wider_months_narrow_metric"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v16_region_bold_cabin_thin_black_grid"
 
 for state_key in [
     "report_cache_key",
@@ -2433,6 +2460,7 @@ if st.button("Build print-ready report", type="primary"):
                     report_pdf = make_printable_selected_report_pdf_bytes(
                         province=province,
                         cabin_name=resolved_name,
+                        region_name=resolved_region,
                         cabin_type=str(selected_row["type"]),
                         ranking_month=ranking_month,
                         summary_by_year=summary_by_year,
