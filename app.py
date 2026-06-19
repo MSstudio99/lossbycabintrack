@@ -52,6 +52,13 @@ PDF_TABLE_TITLE_KHMER_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
 PDF_SUMMARY_TABLE_TITLE_TEXT = "តារាងសង្ខេប — 2026, 2025, 2024"
 PDF_KPI_TABLE_TITLE_TEXT = "ការប្រៀបធៀប KPI ប្រចាំឆ្នាំ"
 
+# fpdf2 + uharfbuzz PDF engine aliases.
+# These aliases let the fpdf2 PDF builder reuse the same Khmer title strings/font.
+PDF_KHMER_REGULAR_FONT_PATH = PDF_TABLE_TITLE_KHMER_FONT_PATH
+PDF_KHMER_BOLD_FONT_PATH = PDF_TABLE_TITLE_KHMER_FONT_PATH
+PDF_MAIN_TITLE_TEXT = PDF_SUMMARY_TABLE_TITLE_TEXT
+PDF_KPI_TITLE_TEXT = PDF_KPI_TABLE_TITLE_TEXT
+
 st.set_page_config(
     page_title="EDC Cabin Loss Dashboard",
     page_icon="⚡",
@@ -148,12 +155,12 @@ def province_from_filename(filename: str) -> Optional[str]:
 @st.cache_data(show_spinner=False)
 def load_raw_csv_from_path(path_str: str, mtime: float) -> pd.DataFrame:
     # mtime is intentionally included so Streamlit invalidates cache when file changes.
-    return pd.read_csv(path_str, header=None)
+    return pd.read_csv(path_str, header=None, dtype=str, keep_default_na=False)
 
 
 @st.cache_data(show_spinner=False)
 def load_raw_csv_from_bytes(content: bytes, label: str) -> pd.DataFrame:
-    return pd.read_csv(io.BytesIO(content), header=None)
+    return pd.read_csv(io.BytesIO(content), header=None, dtype=str, keep_default_na=False)
 
 
 def build_clean_dataframe(raw: pd.DataFrame) -> pd.DataFrame:
@@ -1882,6 +1889,255 @@ def make_pdf_table_title_image_flowable(
     return flowable
 
 
+def _fpdf_text_safe(value) -> str:
+    """Safe string for fpdf2 cells."""
+    if value is None:
+        return "-"
+    text = str(value).strip()
+    return text if text else "-"
+
+
+def _fpdf_font_path() -> Path:
+    """Return the preferred Khmer font path for fpdf2 shaping."""
+    preferred = [
+        PDF_KHMER_REGULAR_FONT_PATH,
+        Path("fonts/KhmerOS_siemreap.ttf"),
+        Path("fonts/NotoSansKhmer-Regular.ttf"),
+        Path("fonts/NotoKhmer.ttf"),
+    ]
+    for path in preferred:
+        if path.exists():
+            return path
+    return preferred[0]
+
+
+def _fpdf_register_khmer_font(pdf) -> str:
+    """Register Khmer font for fpdf2. Returns the font family name."""
+    font_path = _fpdf_font_path()
+    if not font_path.exists():
+        raise RuntimeError(
+            "Khmer font file not found. Please add fonts/KhmerOS_siemreap.ttf "
+            "or fonts/NotoSansKhmer-Regular.ttf to your GitHub repo."
+        )
+
+    # Register the same Khmer font for regular and bold style. This prevents
+    # Undefined font errors when the table needs bold text but only one TTF exists.
+    pdf.add_font("khmer", "", str(font_path))
+    pdf.add_font("khmer", "B", str(font_path))
+    return "khmer"
+
+
+def _fpdf_enable_khmer_shaping(pdf):
+    """Enable HarfBuzz text shaping for Khmer in fpdf2."""
+    try:
+        pdf.set_text_shaping(
+            use_shaping_engine=True,
+            script="khmr",
+            language="khm",
+        )
+    except TypeError:
+        pdf.set_text_shaping(True)
+
+
+def _fpdf_summary_display_for_report(summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Return compact full-year summary table for fpdf2 PDF."""
+    return _summary_display_full_for_report(summary_df)
+
+
+def _fpdf_cell_text_fit(text: str, max_chars: int) -> str:
+    text = _fpdf_text_safe(text)
+    if len(text) <= max_chars:
+        return text
+    return text[: max(1, max_chars - 1)] + "…"
+
+
+def _fpdf_draw_text_cell(
+    pdf,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    text: str,
+    font_family: str,
+    font_size: float,
+    bold: bool = False,
+    align: str = "C",
+    fill_color: tuple[int, int, int] | None = None,
+    text_color: tuple[int, int, int] = (17, 24, 39),
+    border_color: tuple[int, int, int] = (0, 0, 0),
+    line_width: float = 0.10,
+):
+    """Draw one fixed-position fpdf2 table cell."""
+    pdf.set_xy(x, y)
+    pdf.set_draw_color(*border_color)
+    pdf.set_line_width(line_width)
+    if fill_color is not None:
+        pdf.set_fill_color(*fill_color)
+        fill = True
+    else:
+        pdf.set_fill_color(255, 255, 255)
+        fill = False
+
+    pdf.rect(x, y, w, h, style="DF" if fill else "D")
+    pdf.set_text_color(*text_color)
+    pdf.set_font(font_family, style="B" if bold else "", size=font_size)
+
+    # Approximate vertical centering in the fixed-height cell.
+    text_h = font_size * 0.3528
+    ty = y + max(0.8, (h - text_h) / 2 - 0.2)
+    pdf.set_xy(x + 0.6, ty)
+    pdf.cell(w - 1.2, text_h + 1.0, _fpdf_text_safe(text), border=0, align=align)
+
+
+def _fpdf_draw_summary_table_with_year(
+    pdf,
+    display_df: pd.DataFrame,
+    year: int,
+    x: float,
+    y: float,
+    table_w: float,
+    font_family: str,
+    body_font_size: float = 7.2,
+    header_font_size: float = 7.4,
+    unit_font_size: float = 5.8,
+) -> float:
+    """Draw one compact yearly summary table with a left year column."""
+    # Columns: Year | Metric | Unit | Jan-Dec | Acc | Avg
+    weights = [0.55, 0.78, 0.42] + [0.66] * 12 + [0.88, 0.78]
+    total_weight = sum(weights)
+    widths = [table_w * weight / total_weight for weight in weights]
+
+    row_h = 6.6
+    header_h = 6.8
+    rows = [display_df.columns.astype(str).tolist()] + display_df.astype(str).values.tolist()
+    table_h = header_h + row_h * (len(rows) - 1)
+
+    # Merged year column.
+    year_w = widths[0]
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.10)
+    pdf.set_fill_color(226, 232, 240)
+    pdf.rect(x, y, year_w, table_h, style="DF")
+    pdf.set_font(font_family, style="B", size=10.5)
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_xy(x, y + table_h / 2 - 2.5)
+    pdf.cell(year_w, 5, str(year), border=0, align="C")
+
+    data_x = x + year_w
+    col_x = data_x
+
+    # Header row.
+    headers = rows[0]
+    for col_idx, header in enumerate(headers):
+        w = widths[col_idx + 1]
+        _fpdf_draw_text_cell(
+            pdf, col_x, y, w, header_h,
+            _fpdf_cell_text_fit(header, 12),
+            font_family,
+            header_font_size,
+            bold=True,
+            align="C",
+            fill_color=(15, 23, 42),
+            text_color=(255, 255, 255),
+            border_color=(0, 0, 0),
+            line_width=0.10,
+        )
+        col_x += w
+
+    # Body rows.
+    for r_idx, row in enumerate(rows[1:], start=1):
+        metric = str(row[0]).strip().lower() if len(row) else ""
+        y_row = y + header_h + (r_idx - 1) * row_h
+
+        is_gap = metric in {"gap", "total - sale"}
+        fill_color = (255, 237, 213) if is_gap else None
+        text_color = (154, 52, 18) if is_gap else (17, 24, 39)
+        row_bold = is_gap
+
+        col_x = data_x
+        for c_idx, cell in enumerate(row):
+            w = widths[c_idx + 1]
+            align = "L" if c_idx == 0 else ("C" if c_idx == 1 else "R")
+            f_size = unit_font_size if c_idx == 1 else body_font_size
+            max_chars = 9 if c_idx >= 2 else 14
+
+            _fpdf_draw_text_cell(
+                pdf,
+                col_x,
+                y_row,
+                w,
+                row_h,
+                _fpdf_cell_text_fit(cell, max_chars),
+                font_family,
+                f_size,
+                bold=row_bold or (c_idx == 0),
+                align=align,
+                fill_color=fill_color,
+                text_color=text_color,
+                border_color=(0, 0, 0),
+                line_width=0.10,
+            )
+            col_x += w
+
+    return y + table_h
+
+
+def _fpdf_draw_kpi_table(
+    pdf,
+    kpi_df: pd.DataFrame,
+    x: float,
+    y: float,
+    table_w: float,
+    font_family: str,
+) -> float:
+    display_df = format_yearly_kpi_table(kpi_df)
+    if display_df.empty:
+        return y
+
+    headers = display_df.columns.astype(str).tolist()
+    rows = [headers] + display_df.astype(str).values.tolist()
+
+    weights = [0.8, 1.45, 1.45, 1.45, 1.35, 1.55]
+    total_weight = sum(weights)
+    widths = [table_w * weight / total_weight for weight in weights]
+
+    header_h = 7.2
+    row_h = 7.0
+
+    for r_idx, row in enumerate(rows):
+        col_x = x
+        is_header = r_idx == 0
+        y_row = y + (header_h if r_idx > 0 else 0) + max(0, r_idx - 1) * row_h
+
+        for c_idx, cell in enumerate(row):
+            fill_color = (15, 23, 42) if is_header else None
+            text_color = (255, 255, 255) if is_header else (17, 24, 39)
+            f_size = 7.2 if is_header else 7.0
+            align = "C" if c_idx == 0 else "R"
+
+            _fpdf_draw_text_cell(
+                pdf,
+                col_x,
+                y_row,
+                widths[c_idx],
+                header_h if is_header else row_h,
+                _fpdf_cell_text_fit(cell, 18),
+                font_family,
+                f_size,
+                bold=is_header,
+                align=align,
+                fill_color=fill_color,
+                text_color=text_color,
+                border_color=(0, 0, 0),
+                line_width=0.10,
+            )
+            col_x += widths[c_idx]
+
+    return y + header_h + row_h * (len(rows) - 1)
+
+
+
+
 def make_printable_selected_report_pdf_bytes(
     province: str,
     cabin_name: str,
@@ -1893,163 +2149,119 @@ def make_printable_selected_report_pdf_bytes(
     yearly_kpi_df: pd.DataFrame,
     loss_compare_df: pd.DataFrame,
 ) -> bytes:
-    """Build an A4 landscape PDF with summary tables, KPI, and note only."""
+    """Build an A4 landscape PDF using fpdf2 + HarfBuzz Khmer text shaping.
+
+    Best solution for Khmer:
+    - fpdf2 draws the PDF.
+    - uharfbuzz/fonttools enables Khmer shaping.
+    - Khmer titles remain real selectable text, not image workaround.
+    """
     try:
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+        from fpdf import FPDF
     except Exception as exc:
-        raise RuntimeError("PDF export requires reportlab. Add 'reportlab' to requirements.txt.") from exc
+        raise RuntimeError(
+            "PDF export requires fpdf2. Add 'fpdf2', 'uharfbuzz', and 'fonttools' to requirements.txt."
+        ) from exc
 
-    page_size = landscape(A4)
-    page_w, page_h = page_size
-    margin_l = 24
-    margin_r = 24
-    usable_w = page_w - margin_l - margin_r
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=False, margin=7)
+    pdf.set_margins(8, 7, 8)
+    pdf.add_page()
+    pdf.c_margin = 0
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=page_size,
-        leftMargin=margin_l,
-        rightMargin=margin_r,
-        topMargin=26,
-        bottomMargin=30,
-    )
+    font_family = _fpdf_register_khmer_font(pdf)
+    _fpdf_enable_khmer_shaping(pdf)
 
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "ReportTitleA4LandscapeClear",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=21,
-        leading=25,
-        textColor=colors.HexColor("#0f172a"),
-        spaceAfter=7,
-        alignment=0,
-    )
-    h1_style = ParagraphStyle(
-        "ReportH1A4LandscapeClear",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=15,
-        leading=18,
-        textColor=colors.HexColor("#0f172a"),
-        spaceBefore=3,
-        spaceAfter=7,
-        alignment=1,
-    )
-    h2_style = ParagraphStyle(
-        "ReportH2A4LandscapeClear",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        leading=14,
-        textColor=colors.HexColor("#0f172a"),
-        spaceBefore=5,
-        spaceAfter=6,
-        alignment=1,
-    )
-    small_style = ParagraphStyle(
-        "SmallA4LandscapeClear",
-        parent=styles["BodyText"],
-        fontSize=9.0,
-        leading=11,
-        textColor=colors.HexColor("#475569"),
-        alignment=1,
-    )
+    page_w = pdf.w
+    page_h = pdf.h
+    margin_x = 8
+    usable_w = page_w - margin_x * 2
 
-    # PDF TOP-RIGHT PROVINCE/CABIN BOX - edit fontSize here if you want it bigger/smaller.
-    top_right_info_style = ParagraphStyle(
-        "TopRightProvinceCabinBox",
-        parent=styles["BodyText"],
-        fontSize=12.5,
-        leading=14,
-        textColor=colors.HexColor("#0f172a"),
-        alignment=2,
-        spaceAfter=2,
-    )
+    # Top-right Province/Cabin block.
+    pdf.set_font(font_family, style="B", size=10.5)
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_xy(page_w - 78, 6.2)
+    pdf.multi_cell(70, 5.2, f"Province: {_fpdf_text_safe(province)}\nCabin: {_fpdf_text_safe(cabin_name)}", border=0, align="R")
 
-    def _pdf_inline_safe(value) -> str:
-        text = "-" if value is None or str(value).strip() == "" else str(value).strip()
-        return (
-            text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
+    # Khmer main title, shaped by fpdf2/uharfbuzz.
+    pdf.set_font(font_family, style="", size=16)
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_xy(margin_x, 10.2)
+    pdf.cell(usable_w, 8.0, PDF_MAIN_TITLE_TEXT, border=0, align="C")
 
-    # PDF SUBTITLE - Province and Cabin are intentionally removed because they are shown at top-right.
+    # Subtitle without Province/Cabin because they are top-right.
     subtitle = (
-        f"Region: {_pdf_inline_safe(region_name)} | "
-        f"Type: {_pdf_inline_safe(cabin_type)} | "
-        f"Ranking month: {_pdf_inline_safe(ranking_month)} {LATEST_YEAR}"
+        f"Region: {_fpdf_text_safe(region_name)} | "
+        f"Type: {_fpdf_text_safe(cabin_type)} | "
+        f"Ranking month: {_fpdf_text_safe(ranking_month)} {LATEST_YEAR}"
     )
-    story = []
+    pdf.set_font(font_family, style="", size=7.4)
+    pdf.set_text_color(71, 85, 105)
+    pdf.set_xy(margin_x, 19.8)
+    pdf.cell(usable_w, 5.0, subtitle, border=0, align="C")
 
-    # PDF TOP-RIGHT PROVINCE/CABIN VALUE - bold and right aligned.
-    top_right_info = (
-        f"<b>Province: {_pdf_inline_safe(province)}</b><br/>"
-        f"<b>Cabin: {_pdf_inline_safe(cabin_name)}</b>"
-    )
+    y = 26.0
 
-    # Page 1 - all yearly summaries together, with KPI and note below.
-    story.append(Paragraph(top_right_info, top_right_info_style))
-    # PDF table title uses Khmer font rendering only. Other PDF text remains unchanged.
-    story.append(make_pdf_table_title_image_flowable(
-        PDF_SUMMARY_TABLE_TITLE_TEXT,
-        font_size=38,
-        max_width_pt=usable_w,
-        align="center",
-    ))
-    story.append(Paragraph(subtitle, small_style))
-    story.append(Spacer(1, 2))
-
-    # Three summary tables. Year labels are merged into the left side of each table
-    # to save vertical space and allow larger cell font/column widths.
-    summary_widths = [0.21 * inch, 0.55 * inch, 0.32 * inch] + [0.72 * inch] * 12 + [0.72 * inch, 0.72 * inch]
-
+    # Three yearly summary tables.
     for year in [2026, 2025, 2024]:
         if year in summary_by_year:
-            story.append(_reportlab_summary_table_with_rotated_year(
-                summary_by_year[year],
+            display_df = _fpdf_summary_display_for_report(summary_by_year[year])
+            y = _fpdf_draw_summary_table_with_year(
+                pdf,
+                display_df,
                 year,
-                col_widths=summary_widths,
-                # PDF SUMMARY TABLE CELL FONT SIZE - edit these values later if needed.
-                font_size=8.0,
-                header_font_size=8.3,
-                # PDF UNIT COLUMN VALUE FONT SIZE - only changes kWh/% values in the Unit column.
-                unit_font_size=6.6,
-            ))
+                margin_x,
+                y,
+                usable_w,
+                font_family,
+                body_font_size=7.2,
+                header_font_size=7.4,
+                unit_font_size=5.8,
+            )
         else:
-            story.append(Paragraph(f"No {year} data available for this cabin.", small_style))
-        story.append(Spacer(1, 3))
+            pdf.set_font(font_family, style="", size=8)
+            pdf.set_text_color(100, 116, 139)
+            pdf.set_xy(margin_x, y)
+            pdf.cell(usable_w, 7, f"No {year} data available for this cabin.", border=0, align="L")
+            y += 7
+        y += 2.5
 
-    # PDF KPI table title uses Khmer font rendering only. Other PDF text remains unchanged.
-    story.append(make_pdf_table_title_image_flowable(
-        PDF_KPI_TABLE_TITLE_TEXT,
-        font_size=26,
-        max_width_pt=usable_w,
-        align="center",
-    ))
-    story.append(_reportlab_table(
-        format_yearly_kpi_table(yearly_kpi_df),
-        col_widths=[0.72 * inch, 1.34 * inch, 1.34 * inch, 1.34 * inch, 1.30 * inch, 1.48 * inch],
-        font_size=7.7,
-        header_font_size=8.1,
-        numeric_start_col=1,
-    ))
-    story.append(Spacer(1, 2))
+    # Khmer KPI title, shaped by fpdf2/uharfbuzz.
+    pdf.set_font(font_family, style="", size=12)
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_xy(margin_x, y + 0.5)
+    pdf.cell(usable_w, 6, PDF_KPI_TITLE_TEXT, border=0, align="C")
+    y += 7.3
 
-    story.append(Paragraph(
-        "Note: Gap = Total - Sale. Loss % is calculated as (1 - Sale / Total) × 100.",
-        small_style,
-    ))
+    _fpdf_draw_kpi_table(
+        pdf,
+        yearly_kpi_df,
+        margin_x + 36,
+        y,
+        usable_w - 72,
+        font_family,
+    )
 
-    doc.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
-    return buffer.getvalue()
+    # Note
+    pdf.set_font(font_family, style="", size=6.8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.set_xy(margin_x, page_h - 8.2)
+    pdf.cell(
+        usable_w,
+        4.0,
+        "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
+        border=0,
+        align="C",
+    )
+
+    output = pdf.output(dest="S")
+    if isinstance(output, bytearray):
+        return bytes(output)
+    if isinstance(output, bytes):
+        return output
+    return str(output).encode("latin1")
+
+
 
 def build_selected_pdf_report_package_zip_bytes(
     province: str,
@@ -2089,12 +2301,15 @@ def build_selected_pdf_report_package_zip_bytes(
 
 
 def is_reportlab_available() -> bool:
-    """Return True only when reportlab is installed in the Streamlit environment."""
+    """Return True only when fpdf2 + uharfbuzz PDF support is installed."""
     try:
-        import reportlab  # noqa: F401
+        import fpdf  # noqa: F401
+        import uharfbuzz  # noqa: F401
         return True
     except Exception:
         return False
+
+
 
 
 def build_selected_print_report_package_zip_bytes(
@@ -2438,7 +2653,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v24_khmer_table_titles_only"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v25_titles_only_with_fpdf2"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2509,7 +2724,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v24_khmer_table_titles_only"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v25_titles_only_with_fpdf2"
 
 for state_key in [
     "report_cache_key",
