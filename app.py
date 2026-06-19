@@ -2018,10 +2018,17 @@ def _fpdf_draw_summary_table_with_year(
     pdf.set_line_width(0.10)
     pdf.set_fill_color(226, 232, 240)
     pdf.rect(x, y, year_w, table_h, style="DF")
+
     pdf.set_font(font_family, style="B", size=10.5)
     pdf.set_text_color(15, 23, 42)
-    pdf.set_xy(x, y + table_h / 2 - 2.5)
-    pdf.cell(year_w, 5, str(year), border=0, align="C")
+
+    # Rotate the first column/year text upward.
+    center_x = x + year_w / 2
+    center_y = y + table_h / 2
+
+    with pdf.rotation(90, x=center_x, y=center_y):
+        pdf.set_xy(center_x - table_h / 2, center_y - 2.5)
+        pdf.cell(table_h, 5, str(year), border=0, align="C")
 
     data_x = x + year_w
     col_x = data_x
@@ -2653,7 +2660,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v25_titles_only_with_fpdf2"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v26_rotated_year_text_up"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2724,7 +2731,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v25_titles_only_with_fpdf2"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v26_rotated_year_text_up"
 
 for state_key in [
     "report_cache_key",
