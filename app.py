@@ -1484,7 +1484,7 @@ def make_high_res_all_summary_tables_one_page(
     # Keep values readable while fitting all required tables.
     summary_row_h = 96
     def _draw_summary_table_with_year_column(year: int, display_df: pd.DataFrame, y_pos: int) -> int:
-        year_col_w = 86
+        year_col_w = 100
         table_x = margin_x
         data_x = table_x + year_col_w
         data_w = table_width - year_col_w
@@ -1511,19 +1511,14 @@ def make_high_res_all_summary_tables_one_page(
             width=3,
         )
 
-        # Rotated year text.
-        year_text = str(year)
-        year_font = get_pil_font(44, bold=True)
-        temp = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
-        temp_draw = ImageDraw.Draw(temp)
-        bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
-        tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        temp_draw.text(((220 - tw) / 2, (90 - th) / 2), year_text, font=year_font, fill="#0f172a")
-        rotated = temp.rotate(90, expand=True)
-        rx = table_x + (year_col_w - rotated.width) // 2
-        ry = y_start + (y_end - y_start - rotated.height) // 2
-        img.paste(rotated, (rx, ry), rotated)
+        # Year text as normal horizontal table-cell text.
+        draw_centered_text(
+            draw,
+            (table_x, y_start, table_x + year_col_w, y_end),
+            str(year),
+            get_pil_font(27, bold=True),
+            "#0f172a",
+        )
 
         return y_end
 
@@ -2002,7 +1997,7 @@ def _fpdf_draw_summary_table_with_year(
     original/simple Helvetica-style body font for cells and values.
     """
     # Columns: Year | Metric | Unit | Jan-Dec | Acc | Avg
-    weights = [0.55, 0.55, 0.32] + [0.72] * 12 + [0.72, 0.72]
+    weights = [0.70, 0.78, 0.42] + [0.66] * 12 + [0.88, 0.78]
     total_weight = sum(weights)
     widths = [table_w * weight / total_weight for weight in weights]
 
@@ -2017,36 +2012,11 @@ def _fpdf_draw_summary_table_with_year(
     pdf.set_fill_color(226, 232, 240)
     pdf.rect(x, y, year_w, table_h, style="DF")
 
-    # Rotated year text — matched to allreadyfixthetablesizecolumn.py style.
-    year_text = str(year)
-    year_font = get_pil_font(44, bold=True)
-    temp = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
-    temp_draw = ImageDraw.Draw(temp)
-    bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    temp_draw.text(((220 - tw) / 2, (90 - th) / 2), year_text, font=year_font, fill="#0f172a")
-    rotated = temp.rotate(90, expand=True)
-
-    year_buf = io.BytesIO()
-    rotated.save(year_buf, format="PNG")
-    year_buf.seek(0)
-
-    # Scale the same rotated image into the fpdf2 first column.
-    img_w = max(1.0, year_w - 1.2)
-    img_h = img_w * rotated.height / rotated.width
-
-    if img_h > table_h - 3.0:
-        img_h = table_h - 3.0
-        img_w = img_h * rotated.width / rotated.height
-
-    pdf.image(
-        year_buf,
-        x=x + (year_w - img_w) / 2,
-        y=y + (table_h - img_h) / 2,
-        w=img_w,
-        h=img_h,
-    )
+    # Year text as normal horizontal table-cell text.
+    pdf.set_font(body_font_family, style="B", size=body_font_size)
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_xy(x, y + table_h / 2 - 2.5)
+    pdf.cell(year_w, 5, str(year), border=0, align="C")
 
     data_x = x + year_w
     col_x = data_x
@@ -2679,7 +2649,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v31_year_column_like_alreadyfixed"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v32_year_text_not_rotated"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2750,7 +2720,7 @@ if not pdf_supported:
         "To enable PDF, add `fpdf2`, `uharfbuzz`, and `fonttools` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v31_year_column_like_alreadyfixed"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v32_year_text_not_rotated"
 
 for state_key in [
     "report_cache_key",
