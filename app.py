@@ -46,11 +46,11 @@ MONTH_FULL_LIST = list(MONTH_MAP.values())
 # =========================================================
 # This Khmer font is used ONLY for the PDF table/title headings.
 # Other PDF text and table values remain unchanged.
-PDF_TABLE_TITLE_KHMER_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
+PDF_TABLE_TITLE_KHMER_FONT_PATH = Path("fonts/KhmerOS_muollight.ttf")
 
 # Change only these PDF table titles when needed.
-PDF_SUMMARY_TABLE_TITLE_TEXT = "តារាងសង្ខេប — 2026, 2025, 2024"
-PDF_KPI_TABLE_TITLE_TEXT = "ការប្រៀបធៀប KPI ប្រចាំឆ្នាំ"
+PDF_SUMMARY_TABLE_TITLE_TEXT = "តារាងបាត់បង់ថាមពលសង្ខេបនៃឆ្នាំ — 2026, 2025, 2024"
+PDF_KPI_TABLE_TITLE_TEXT = "ការប្រៀបធៀបការបាត់បង់ថាមពលប្រចាំឆ្នាំ"
 
 st.set_page_config(
     page_title="EDC Cabin Loss Dashboard",
@@ -1555,7 +1555,7 @@ def make_high_res_all_summary_tables_one_page(
 
     _draw_center_line(
         height - 34,
-        "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
+        "Note: Gap = Total - Sale | Loss % = (1 - Sale / Total) × 100.",
         get_pil_font(20),
         "#64748b",
     )
