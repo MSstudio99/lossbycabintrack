@@ -1997,7 +1997,7 @@ def _fpdf_draw_summary_table_with_year(
     original/simple Helvetica-style body font for cells and values.
     """
     # Columns: Year | Metric | Unit | Jan-Dec | Acc | Avg
-    weights = [0.60, 0.55, 0.32] + [0.72] * 12 + [0.72, 0.72]
+    weights = [0.50, 0.55, 0.32] + [0.72] * 12 + [0.72, 0.72]
     total_weight = sum(weights)
     widths = [table_w * weight / total_weight for weight in weights]
 
