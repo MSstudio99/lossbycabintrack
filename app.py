@@ -2021,7 +2021,7 @@ def _fpdf_draw_summary_table_with_year(
 
     # Draw rotated year text as image so it always appears in the first column.
     year_text = str(year)
-    year_font = get_pil_font(44, bold=True)
+    year_font = get_pil_font(72, bold=True)
 
     temp_img = Image.new("RGBA", (180, 70), (255, 255, 255, 0))
     temp_draw = ImageDraw.Draw(temp_img)
