@@ -1513,7 +1513,7 @@ def make_high_res_all_summary_tables_one_page(
 
         # Rotated year text.
         year_text = str(year)
-        year_font = get_pil_font(80, bold=True)
+        year_font = get_pil_font(44, bold=True)
         temp = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
         temp_draw = ImageDraw.Draw(temp)
         bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
@@ -2687,7 +2687,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v29_fpdf2_titles_only_body_original"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v30_requested_png_elements_titles_fixed"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2758,7 +2758,7 @@ if not pdf_supported:
         "To enable PDF, add `fpdf2`, `uharfbuzz`, and `fonttools` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v29_fpdf2_titles_only_body_original"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v30_requested_png_elements_titles_fixed"
 
 for state_key in [
     "report_cache_key",
