@@ -2003,7 +2003,7 @@ def _fpdf_draw_summary_table_with_year(
 ) -> float:
     """Draw one compact yearly summary table with a left year column."""
     # Columns: Year | Metric | Unit | Jan-Dec | Acc | Avg
-    weights = [0.55, 0.78, 0.42] + [0.66] * 12 + [0.88, 0.78]
+    weights = [0.21, 0.55, 0.32] + [0.72] * 12 + [0.72, 0.72]
     total_weight = sum(weights)
     widths = [table_w * weight / total_weight for weight in weights]
 
@@ -2021,7 +2021,7 @@ def _fpdf_draw_summary_table_with_year(
 
     # Draw rotated year text as image so it always appears in the first column.
     year_text = str(year)
-    year_font = get_pil_font(72, bold=True)
+    year_font = get_pil_font(44, bold=True)
 
     temp_img = Image.new("RGBA", (180, 70), (255, 255, 255, 0))
     temp_draw = ImageDraw.Draw(temp_img)
