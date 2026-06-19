@@ -3,3 +3,6 @@ pandas
 plotly
 pillow
 reportlab
+fpdf2
+uharfbuzz
+fonttools
