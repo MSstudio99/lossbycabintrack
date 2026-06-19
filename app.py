@@ -2017,36 +2017,28 @@ def _fpdf_draw_summary_table_with_year(
     pdf.set_fill_color(226, 232, 240)
     pdf.rect(x, y, year_w, table_h, style="DF")
 
-    # Draw rotated year text as an image so it always appears in the first column.
+    # Rotated year text — matched to allreadyfixthetablesizecolumn.py style.
     year_text = str(year)
-    year_font = get_pil_font(54, bold=True)
-
-    temp_img = Image.new("RGBA", (210, 80), (255, 255, 255, 0))
-    temp_draw = ImageDraw.Draw(temp_img)
-
+    year_font = get_pil_font(44, bold=True)
+    temp = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
+    temp_draw = ImageDraw.Draw(temp)
     bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
-
-    temp_draw.text(
-        ((210 - tw) / 2, (80 - th) / 2 - bbox[1]),
-        year_text,
-        font=year_font,
-        fill=(15, 23, 42, 255),
-    )
-
-    rotated_img = temp_img.rotate(90, expand=True)
+    temp_draw.text(((220 - tw) / 2, (90 - th) / 2), year_text, font=year_font, fill="#0f172a")
+    rotated = temp.rotate(90, expand=True)
 
     year_buf = io.BytesIO()
-    rotated_img.save(year_buf, format="PNG")
+    rotated.save(year_buf, format="PNG")
     year_buf.seek(0)
 
-    img_h = table_h - 4.0
-    img_w = img_h * rotated_img.width / rotated_img.height
+    # Scale the same rotated image into the fpdf2 first column.
+    img_w = max(1.0, year_w - 1.2)
+    img_h = img_w * rotated.height / rotated.width
 
-    if img_w > year_w - 2.0:
-        img_w = year_w - 2.0
-        img_h = img_w * rotated_img.height / rotated_img.width
+    if img_h > table_h - 3.0:
+        img_h = table_h - 3.0
+        img_w = img_h * rotated.width / rotated.height
 
     pdf.image(
         year_buf,
@@ -2687,7 +2679,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v30_requested_png_elements_titles_fixed"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v31_year_column_like_alreadyfixed"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2758,7 +2750,7 @@ if not pdf_supported:
         "To enable PDF, add `fpdf2`, `uharfbuzz`, and `fonttools` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v30_requested_png_elements_titles_fixed"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v31_year_column_like_alreadyfixed"
 
 for state_key in [
     "report_cache_key",
