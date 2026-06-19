@@ -1513,7 +1513,7 @@ def make_high_res_all_summary_tables_one_page(
 
         # Rotated year text.
         year_text = str(year)
-        year_font = get_pil_font(44, bold=True)
+        year_font = get_pil_font(80, bold=True)
         temp = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
         temp_draw = ImageDraw.Draw(temp)
         bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
