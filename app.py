@@ -2019,47 +2019,44 @@ def _fpdf_draw_summary_table_with_year(
     pdf.set_fill_color(226, 232, 240)
     pdf.rect(x, y, year_w, table_h, style="DF")
 
-    pdf.set_font(font_family, style="B", size=10.5)
-    pdf.set_text_color(15, 23, 42)
-
     # Draw rotated year text as image so it always appears in the first column.
-year_text = str(year)
-year_font = get_pil_font(44, bold=True)
+    year_text = str(year)
+    year_font = get_pil_font(44, bold=True)
 
-temp_img = Image.new("RGBA", (180, 70), (255, 255, 255, 0))
-temp_draw = ImageDraw.Draw(temp_img)
+    temp_img = Image.new("RGBA", (180, 70), (255, 255, 255, 0))
+    temp_draw = ImageDraw.Draw(temp_img)
 
-bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
-tw = bbox[2] - bbox[0]
-th = bbox[3] - bbox[1]
+    bbox = temp_draw.textbbox((0, 0), year_text, font=year_font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
 
-temp_draw.text(
-    ((180 - tw) / 2, (70 - th) / 2 - bbox[1]),
-    year_text,
-    font=year_font,
-    fill=(15, 23, 42, 255),
-)
+    temp_draw.text(
+        ((180 - tw) / 2, (70 - th) / 2 - bbox[1]),
+        year_text,
+        font=year_font,
+        fill=(15, 23, 42, 255),
+    )
 
-rotated_img = temp_img.rotate(90, expand=True)
+    rotated_img = temp_img.rotate(90, expand=True)
 
-year_buf = io.BytesIO()
-rotated_img.save(year_buf, format="PNG")
-year_buf.seek(0)
+    year_buf = io.BytesIO()
+    rotated_img.save(year_buf, format="PNG")
+    year_buf.seek(0)
 
-img_h = table_h - 4.0
-img_w = img_h * rotated_img.width / rotated_img.height
+    img_h = table_h - 4.0
+    img_w = img_h * rotated_img.width / rotated_img.height
 
-if img_w > year_w - 2.0:
-    img_w = year_w - 2.0
-    img_h = img_w * rotated_img.height / rotated_img.width
+    if img_w > year_w - 2.0:
+        img_w = year_w - 2.0
+        img_h = img_w * rotated_img.height / rotated_img.width
 
-pdf.image(
-    year_buf,
-    x=x + (year_w - img_w) / 2,
-    y=y + (table_h - img_h) / 2,
-    w=img_w,
-    h=img_h,
-)
+    pdf.image(
+        year_buf,
+        x=x + (year_w - img_w) / 2,
+        y=y + (table_h - img_h) / 2,
+        w=img_w,
+        h=img_h,
+    )
 
     data_x = x + year_w
     col_x = data_x
@@ -2691,7 +2688,7 @@ with summary_control_col:
                 st.rerun()
 
         # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v26_rotated_year_text_up"
+        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v27_year_text_image_visible"
         ranking_area_pdf_ready = (
             st.session_state.get("report_cache_key") == ranking_area_report_key
             and st.session_state.get("report_pdf_bytes")
@@ -2762,7 +2759,7 @@ if not pdf_supported:
         "To enable PDF, add `reportlab` to requirements.txt and redeploy."
     )
 
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v26_rotated_year_text_up"
+report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v27_year_text_image_visible"
 
 for state_key in [
     "report_cache_key",
