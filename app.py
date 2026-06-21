@@ -46,11 +46,11 @@ MONTH_FULL_LIST = list(MONTH_MAP.values())
 # =========================================================
 # This Khmer font is used ONLY for the PDF table/title headings.
 # Other PDF text and table values remain unchanged.
-PDF_TABLE_TITLE_KHMER_FONT_PATH = Path("fonts/KhmerOS_muollight.ttf")
+PDF_TABLE_TITLE_KHMER_FONT_PATH = Path("fonts/KhmerOS_siemreap.ttf")
 
 # Change only these PDF table titles when needed.
-PDF_SUMMARY_TABLE_TITLE_TEXT = "តារាងបាត់បង់ថាមពលសង្ខេបនៃឆ្នាំ — 2026, 2025, 2024"
-PDF_KPI_TABLE_TITLE_TEXT = "ការប្រៀបធៀបការបាត់បង់ថាមពលប្រចាំឆ្នាំ"
+PDF_SUMMARY_TABLE_TITLE_TEXT = "តារាងសង្ខេប — 2026, 2025, 2024"
+PDF_KPI_TABLE_TITLE_TEXT = "ការប្រៀបធៀប KPI ប្រចាំឆ្នាំ"
 
 st.set_page_config(
     page_title="EDC Cabin Loss Dashboard",
@@ -1555,7 +1555,7 @@ def make_high_res_all_summary_tables_one_page(
 
     _draw_center_line(
         height - 34,
-        "Note: Gap = Total - Sale | Loss % = (1 - Sale / Total) × 100.",
+        "Note: Gap = Total - Sale. Loss % = (1 - Sale / Total) × 100.",
         get_pil_font(20),
         "#64748b",
     )
@@ -1997,7 +1997,7 @@ def _fpdf_draw_summary_table_with_year(
     original/simple Helvetica-style body font for cells and values.
     """
     # Columns: Year | Metric | Unit | Jan-Dec | Acc | Avg
-    weights = [0.50, 0.55, 0.32] + [0.72] * 12 + [0.72, 0.72]
+    weights = [0.70, 0.78, 0.42] + [0.66] * 12 + [0.88, 0.78]
     total_weight = sum(weights)
     widths = [table_w * weight / total_weight for weight in weights]
 
@@ -2356,6 +2356,158 @@ def build_selected_print_report_package_zip_bytes(
     return zip_buffer.getvalue()
 
 
+def build_selected_cabin_csv_bytes(
+    province: str,
+    cabin_name: str,
+    ranking_month: str,
+    summary_by_year: Dict[int, pd.DataFrame],
+    loss_compare_df: pd.DataFrame,
+    yearly_kpi_df: pd.DataFrame,
+) -> bytes:
+    """Build one clean CSV for the selected cabin only.
+
+    It contains:
+    - yearly summary rows for 2026, 2025, 2024 when available
+    - monthly loss comparison
+    - yearly KPI comparison
+    """
+    parts: list[pd.DataFrame] = []
+
+    summary_frames = []
+    for year in [2026, 2025, 2024]:
+        if year in summary_by_year:
+            temp = summary_by_year[year].copy()
+            temp.insert(0, "Year", year)
+            summary_frames.append(temp)
+
+    if summary_frames:
+        selected_summary = pd.concat(summary_frames, ignore_index=True)
+        selected_summary.insert(0, "Province", province)
+        selected_summary.insert(1, "Cabin", cabin_name)
+        selected_summary.insert(2, "Ranking Month", f"{ranking_month} {LATEST_YEAR}")
+        parts.append(pd.DataFrame([["SELECTED CABIN YEARLY SUMMARY"]]))
+        parts.append(selected_summary)
+
+    if loss_compare_df is not None and not loss_compare_df.empty:
+        parts.append(pd.DataFrame([[]]))
+        parts.append(pd.DataFrame([["MONTHLY LOSS COMPARISON"]]))
+        parts.append(loss_compare_df)
+
+    if yearly_kpi_df is not None and not yearly_kpi_df.empty:
+        parts.append(pd.DataFrame([[]]))
+        parts.append(pd.DataFrame([["YEARLY KPI COMPARISON"]]))
+        parts.append(yearly_kpi_df)
+
+    if not parts:
+        return b""
+
+    buffer = io.StringIO()
+    for idx, part in enumerate(parts):
+        part.to_csv(buffer, index=False, header=idx not in [1, 4, 7])
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def build_batch_pdf_reports_zip_bytes(
+    province: str,
+    ranking_month: str,
+    ranking_df: pd.DataFrame,
+    year_sources: Dict[int, Dict[str, CsvSource]],
+    data_2026: Dict[str, pd.DataFrame],
+) -> bytes:
+    """Build a lightweight ZIP containing one sharp PDF per selected ranked cabin.
+
+    This intentionally avoids PNG pages inside the ZIP so the file stays smaller.
+    The PDFs remain clear because they are generated as PDF tables, not screenshots.
+    """
+    zip_buffer = io.BytesIO()
+    manifest_rows = []
+    error_rows = []
+
+    meta_2026_indexed_local = data_2026["cabin_meta_indexed"]
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for _, rank_row in ranking_df.iterrows():
+            try:
+                cabin_key = rank_row["__cabin_key"]
+                selected_row_2026 = get_row_from_meta(meta_2026_indexed_local, cabin_key)
+                if selected_row_2026 is None:
+                    error_rows.append({
+                        "Rank": rank_row.get("Rank", ""),
+                        "Cabin": rank_row.get("display_name", ""),
+                        "Error": "Cabin not found in 2026 metadata",
+                    })
+                    continue
+
+                cabin_name = str(selected_row_2026["display_name"])
+                region_name = normalize_text(selected_row_2026.get("region", ""))
+                if region_name == "":
+                    region_name = normalize_text(selected_row_2026.get("Region", ""))
+
+                summary_by_year_i, loss_by_year_i, _, status_by_year_i = get_summary_and_loss_for_cabin(
+                    year_sources=year_sources,
+                    province=province,
+                    selected_cabin_key=cabin_key,
+                    data_2026=data_2026,
+                    selected_row_2026=selected_row_2026,
+                )
+
+                yearly_kpi_df_i = build_yearly_kpi_table(summary_by_year_i)
+                loss_compare_df_i = build_loss_comparison_table(summary_by_year_i, loss_by_year_i)
+
+                report_pdf_i = make_printable_selected_report_pdf_bytes(
+                    province=province,
+                    cabin_name=cabin_name,
+                    region_name=region_name,
+                    cabin_type=str(selected_row_2026["type"]),
+                    ranking_month=ranking_month,
+                    summary_by_year=summary_by_year_i,
+                    loss_by_year=loss_by_year_i,
+                    yearly_kpi_df=yearly_kpi_df_i,
+                    loss_compare_df=loss_compare_df_i,
+                )
+
+                rank_no = int(rank_row.get("Rank", 0))
+                safe_cabin = safe_filename(cabin_name)
+                pdf_name = safe_filename(
+                    f"Rank_{rank_no:03d}_{province}_Cabin_{safe_cabin}_{ranking_month}_{LATEST_YEAR}.pdf"
+                )
+                zipf.writestr(pdf_name, report_pdf_i)
+
+                manifest_rows.append({
+                    "Rank": rank_no,
+                    "Province": province,
+                    "Cabin": cabin_name,
+                    "Region": region_name,
+                    "Type": str(selected_row_2026["type"]),
+                    "PDF File": pdf_name,
+                    "2026 Status": status_by_year_i.get(2026, "-"),
+                    "2025 Status": status_by_year_i.get(2025, "-"),
+                    "2024 Status": status_by_year_i.get(2024, "-"),
+                })
+
+            except Exception as exc:
+                error_rows.append({
+                    "Rank": rank_row.get("Rank", ""),
+                    "Cabin": rank_row.get("display_name", ""),
+                    "Error": str(exc),
+                })
+
+        if manifest_rows:
+            zipf.writestr(
+                safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_batch_manifest.csv"),
+                pd.DataFrame(manifest_rows).to_csv(index=False).encode("utf-8-sig"),
+            )
+
+        if error_rows:
+            zipf.writestr(
+                safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_batch_errors.csv"),
+                pd.DataFrame(error_rows).to_csv(index=False).encode("utf-8-sig"),
+            )
+
+    return zip_buffer.getvalue()
+
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -2473,6 +2625,90 @@ else:
         file_name=safe_filename(f"{province}_{ranking_month}_{LATEST_YEAR}_visible_ranking.csv"),
         mime="text/csv",
     )
+
+    with st.expander("Batch print-ready PDF reports", expanded=False):
+        st.caption(
+            "Small clear version: this builds a ZIP of PDF reports only. "
+            "No PNG pages are included, so the ZIP stays smaller and the PDF tables remain sharp."
+        )
+
+        batch_scope = st.radio(
+            "Cabins to include",
+            ["Current visible ranking", "Top 20", "Top 50"],
+            horizontal=True,
+            key=f"batch_pdf_scope_{province}_{ranking_month}_{top_n_choice}",
+        )
+
+        if batch_scope == "Current visible ranking":
+            batch_df = visible_ranking_df.copy()
+        elif batch_scope == "Top 20":
+            batch_df = full_ranking_df.head(20).copy()
+        else:
+            batch_df = full_ranking_df.head(50).copy()
+
+        st.write(f"PDFs to build: **{len(batch_df)}**")
+
+        batch_cache_key = (
+            f"{province}|{ranking_month}|{batch_scope}|{len(batch_df)}|"
+            "print_ready_batch_v33_pdf_zip_only"
+        )
+
+        for state_key in [
+            "batch_pdf_cache_key",
+            "batch_pdf_zip_bytes",
+            "batch_pdf_error",
+        ]:
+            if state_key not in st.session_state:
+                st.session_state[state_key] = None
+
+        batch_pdf_supported = is_reportlab_available()
+
+        if not batch_pdf_supported:
+            st.warning(
+                "Batch PDF export needs `fpdf2`, `uharfbuzz`, and `fonttools` in requirements.txt."
+            )
+
+        if st.button(
+            "Build batch PDF ZIP",
+            type="secondary",
+            disabled=(not batch_pdf_supported or batch_df.empty),
+            key=f"build_batch_pdf_zip_{province}_{ranking_month}_{top_n_choice}",
+            use_container_width=True,
+        ):
+            st.session_state["batch_pdf_cache_key"] = None
+            st.session_state["batch_pdf_zip_bytes"] = None
+            st.session_state["batch_pdf_error"] = None
+
+            try:
+                with st.spinner(f"Building {len(batch_df)} PDF reports into one ZIP..."):
+                    st.session_state["batch_pdf_zip_bytes"] = build_batch_pdf_reports_zip_bytes(
+                        province=province,
+                        ranking_month=ranking_month,
+                        ranking_df=batch_df,
+                        year_sources=year_sources,
+                        data_2026=data_2026,
+                    )
+                    st.session_state["batch_pdf_cache_key"] = batch_cache_key
+            except Exception as exc:
+                st.session_state["batch_pdf_error"] = f"Could not build batch PDF ZIP: {exc}"
+
+        if st.session_state.get("batch_pdf_error"):
+            st.error(st.session_state["batch_pdf_error"])
+
+        if (
+            st.session_state.get("batch_pdf_cache_key") == batch_cache_key
+            and st.session_state.get("batch_pdf_zip_bytes")
+        ):
+            st.download_button(
+                "Download batch PDF ZIP",
+                data=st.session_state["batch_pdf_zip_bytes"],
+                file_name=safe_filename(
+                    f"{province}_{ranking_month}_{LATEST_YEAR}_{batch_scope}_PDF_reports.zip"
+                ),
+                mime="application/zip",
+                use_container_width=True,
+                key=f"download_batch_pdf_zip_{province}_{ranking_month}_{top_n_choice}",
+            )
 
 st.divider()
 
@@ -2648,30 +2884,102 @@ with summary_control_col:
                 st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
                 st.rerun()
 
-        # PDF report download is placed here instead of the old Ranking position control.
-        ranking_area_report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v32_year_text_not_rotated"
-        ranking_area_pdf_ready = (
-            st.session_state.get("report_cache_key") == ranking_area_report_key
-            and st.session_state.get("report_pdf_bytes")
-        )
-        safe_cabin_name_rank = safe_filename(resolved_name)
+        st.markdown("#### Print-ready report")
+        st.caption("Selected cabin only: build once, then download PDF report or CSV.")
 
-        if ranking_area_pdf_ready:
+        selected_report_key = (
+            f"{province}|{ranking_month}|{selected_cabin_key}|"
+            f"{','.join(map(str, sorted(summary_by_year.keys())))}|"
+            "print_ready_selected_v33_pdf_csv_only"
+        )
+
+        for state_key in [
+            "selected_report_cache_key",
+            "selected_report_pdf_bytes",
+            "selected_report_csv_bytes",
+            "selected_report_error",
+        ]:
+            if state_key not in st.session_state:
+                st.session_state[state_key] = None
+
+        selected_pdf_supported = is_reportlab_available()
+
+        if st.button(
+            "Build print-ready report",
+            type="primary",
+            disabled=not selected_pdf_supported,
+            key=f"build_selected_print_ready_{province}_{ranking_month}_{selected_cabin_key}",
+            use_container_width=True,
+        ):
+            st.session_state["selected_report_cache_key"] = None
+            st.session_state["selected_report_pdf_bytes"] = None
+            st.session_state["selected_report_csv_bytes"] = None
+            st.session_state["selected_report_error"] = None
+
+            try:
+                with st.spinner("Building selected cabin PDF report and CSV..."):
+                    selected_pdf_bytes = make_printable_selected_report_pdf_bytes(
+                        province=province,
+                        cabin_name=resolved_name,
+                        region_name=resolved_region,
+                        cabin_type=str(selected_row["type"]),
+                        ranking_month=ranking_month,
+                        summary_by_year=summary_by_year,
+                        loss_by_year=loss_by_year,
+                        yearly_kpi_df=yearly_kpi_df,
+                        loss_compare_df=loss_compare_df,
+                    )
+                    selected_csv_bytes = build_selected_cabin_csv_bytes(
+                        province=province,
+                        cabin_name=resolved_name,
+                        ranking_month=ranking_month,
+                        summary_by_year=summary_by_year,
+                        loss_compare_df=loss_compare_df,
+                        yearly_kpi_df=yearly_kpi_df,
+                    )
+
+                    st.session_state["selected_report_cache_key"] = selected_report_key
+                    st.session_state["selected_report_pdf_bytes"] = selected_pdf_bytes
+                    st.session_state["selected_report_csv_bytes"] = selected_csv_bytes
+            except Exception as exc:
+                st.session_state["selected_report_error"] = f"Could not build selected report: {exc}"
+
+        if not selected_pdf_supported:
+            st.warning(
+                "PDF export needs `fpdf2`, `uharfbuzz`, and `fonttools` in requirements.txt."
+            )
+
+        if st.session_state.get("selected_report_error"):
+            st.error(st.session_state["selected_report_error"])
+
+        selected_report_ready = (
+            st.session_state.get("selected_report_cache_key") == selected_report_key
+            and st.session_state.get("selected_report_pdf_bytes")
+            and st.session_state.get("selected_report_csv_bytes")
+        )
+
+        if selected_report_ready:
+            safe_cabin_name_rank = safe_filename(resolved_name)
+            st.success("Selected cabin report is ready.")
             st.download_button(
                 "Download PDF report",
-                data=st.session_state["report_pdf_bytes"],
-                file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name_rank}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"),
+                data=st.session_state["selected_report_pdf_bytes"],
+                file_name=safe_filename(
+                    f"{province}_Cabin_{safe_cabin_name_rank}_{ranking_month}_{LATEST_YEAR}_printable_report.pdf"
+                ),
                 mime="application/pdf",
                 use_container_width=True,
-                key=f"summary_download_pdf_report_{province}_{ranking_month}_{selected_cabin_key}",
+                key=f"download_selected_pdf_{province}_{ranking_month}_{selected_cabin_key}",
             )
-        else:
-            st.button(
-                "Download PDF report",
-                disabled=True,
-                help="Click Build print-ready report below first, then this download button will become active.",
+            st.download_button(
+                "Download selected cabin CSV",
+                data=st.session_state["selected_report_csv_bytes"],
+                file_name=safe_filename(
+                    f"{province}_Cabin_{safe_cabin_name_rank}_{ranking_month}_{LATEST_YEAR}_selected_cabin.csv"
+                ),
+                mime="text/csv",
                 use_container_width=True,
-                key=f"summary_download_pdf_report_disabled_{province}_{ranking_month}_{selected_cabin_key}",
+                key=f"download_selected_csv_{province}_{ranking_month}_{selected_cabin_key}",
             )
 
         ranked_choice_key = st.selectbox(
@@ -2703,148 +3011,9 @@ with st.expander("Matched raw rows — 2026"):
 
 st.divider()
 
-# ---------------------------------------------------------
-# Print-ready export
-# ---------------------------------------------------------
-st.subheader("Print-Ready Export — Selected Cabin Only")
-st.caption(
-    "For printing, PDF is best when reportlab is installed. "
-    "The app always creates A4 300 DPI PNG pages, so export still works even if PDF support is missing."
-)
-
-pdf_supported = is_reportlab_available()
-if not pdf_supported:
-    st.warning(
-        "PDF export is currently disabled because `fpdf2` or `uharfbuzz` is not installed in this Streamlit environment. "
-        "The app will still build high-resolution A4 PNG pages and CSV files. "
-        "To enable PDF, add `fpdf2`, `uharfbuzz`, and `fonttools` to requirements.txt and redeploy."
-    )
-
-report_key = f"{province}|{ranking_month}|{selected_cabin_key}|{','.join(map(str, sorted(summary_by_year.keys())))}|print_ready_v32_year_text_not_rotated"
-
-for state_key in [
-    "report_cache_key",
-    "report_pdf_bytes",
-    "report_png_pages_zip_bytes",
-    "report_package_zip_bytes",
-    "report_export_warning",
-    "report_export_error",
-]:
-    if state_key not in st.session_state:
-        st.session_state[state_key] = None
-
-if st.button("Build print-ready report", type="primary"):
-    st.session_state["report_cache_key"] = None
-    st.session_state["report_pdf_bytes"] = None
-    st.session_state["report_png_pages_zip_bytes"] = None
-    st.session_state["report_package_zip_bytes"] = None
-    st.session_state["report_export_warning"] = None
-    st.session_state["report_export_error"] = None
-
-    try:
-        spinner_text = "Building print-ready report..."
-        if pdf_supported:
-            spinner_text = "Building PDF plus high-resolution A4 PNG pages..."
-        else:
-            spinner_text = "Building high-resolution A4 PNG pages and CSV package..."
-
-        with st.spinner(spinner_text):
-            # Build PNG pages first because this path has no external PDF dependency.
-            png_pages_zip = build_high_res_png_pages_zip_bytes(
-                province=province,
-                cabin_name=resolved_name,
-                cabin_type=str(selected_row["type"]),
-                ranking_month=ranking_month,
-                summary_by_year=summary_by_year,
-                loss_by_year=loss_by_year,
-                yearly_kpi_df=yearly_kpi_df,
-                loss_compare_df=loss_compare_df,
-            )
-
-            report_pdf = None
-            if pdf_supported:
-                try:
-                    report_pdf = make_printable_selected_report_pdf_bytes(
-                        province=province,
-                        cabin_name=resolved_name,
-                        region_name=resolved_region,
-                        cabin_type=str(selected_row["type"]),
-                        ranking_month=ranking_month,
-                        summary_by_year=summary_by_year,
-                        loss_by_year=loss_by_year,
-                        yearly_kpi_df=yearly_kpi_df,
-                        loss_compare_df=loss_compare_df,
-                    )
-                except Exception as exc:
-                    report_pdf = None
-                    st.session_state["report_export_warning"] = (
-                        "PDF could not be built, but high-resolution PNG pages were created. "
-                        f"PDF error: {exc}"
-                    )
-            else:
-                st.session_state["report_export_warning"] = (
-                    "PDF was skipped because fpdf2/uharfbuzz is not installed. "
-                    "Use the A4 PNG pages ZIP, or add fpdf2, uharfbuzz, and fonttools to requirements.txt and redeploy."
-                )
-
-            report_package_zip = build_selected_print_report_package_zip_bytes(
-                province=province,
-                cabin_name=resolved_name,
-                ranking_month=ranking_month,
-                report_pdf_bytes=report_pdf,
-                png_pages_zip_bytes=png_pages_zip,
-                visible_ranking_df=visible_ranking_df,
-                summary_by_year=summary_by_year,
-                loss_compare_df=loss_compare_df,
-                yearly_kpi_df=yearly_kpi_df,
-            )
-
-            st.session_state["report_cache_key"] = report_key
-            st.session_state["report_pdf_bytes"] = report_pdf
-            st.session_state["report_png_pages_zip_bytes"] = png_pages_zip
-            st.session_state["report_package_zip_bytes"] = report_package_zip
-
-            # Rerun immediately so the moved PDF download button in the ranking panel becomes active.
-            st.rerun()
-
-    except Exception as exc:
-        st.session_state["report_export_error"] = (
-            "Could not build the print-ready export. "
-            "Please check the selected cabin data and try again. "
-            f"Details: {exc}"
-        )
-
-if st.session_state.get("report_export_error"):
-    st.error(st.session_state["report_export_error"])
-
-if st.session_state.get("report_export_warning"):
-    st.warning(st.session_state["report_export_warning"])
-
-if st.session_state.get("report_cache_key") == report_key and st.session_state.get("report_png_pages_zip_bytes"):
-    safe_cabin_name = safe_filename(resolved_name)
-    st.success("Print-ready export is ready. The PDF report download button is now available in the Browse ranked cabins panel.")
-
-    col_png, col_zip = st.columns(2)
-    with col_png:
-        st.download_button(
-            "Download A4 PNG pages ZIP",
-            data=st.session_state["report_png_pages_zip_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_A4_300DPI_png_pages.zip"),
-            mime="application/zip",
-            use_container_width=True,
-        )
-    with col_zip:
-        st.download_button(
-            "Download report package ZIP",
-            data=st.session_state["report_package_zip_bytes"],
-            file_name=safe_filename(f"{province}_Cabin_{safe_cabin_name}_{ranking_month}_{LATEST_YEAR}_report_package.zip"),
-            mime="application/zip",
-            use_container_width=True,
-        )
-
-with st.expander("Why the old single PNG export was replaced"):
+with st.expander("Print-ready export location"):
     st.write(
-        "A single long PNG is a raster image. When it is stretched or scaled for printing, text becomes blurry. "
-        "This version uses PDF when available and always creates separate A4 landscape PNG pages at 300 DPI. "
-        "It also avoids crashing if PDF support is missing from Streamlit Cloud."
+        "Selected cabin export is now beside the summary tables under **Print-ready report**. "
+        "Batch export is now under the ranking table in **Batch print-ready PDF reports**. "
+        "The batch ZIP contains PDFs only, which keeps the file smaller and avoids blurry image scaling."
     )
