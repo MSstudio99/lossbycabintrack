@@ -58,6 +58,83 @@ st.set_page_config(
     layout="wide",
 )
 
+def inject_dashboard_css():
+    """Small UI polish for a cleaner and more convenient dashboard."""
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 2.0rem;
+        }
+        div[data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            padding: 0.75rem 0.85rem;
+            border-radius: 0.85rem;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+        div[data-testid="stMetric"] label {
+            color: #475569 !important;
+        }
+        .edc-hero {
+            padding: 1.0rem 1.2rem;
+            border-radius: 1.0rem;
+            border: 1px solid #e2e8f0;
+            background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 100%);
+            margin-bottom: 1.0rem;
+        }
+        .edc-hero h1 {
+            margin: 0;
+            color: #0f172a;
+            font-size: 2.0rem;
+        }
+        .edc-hero p {
+            margin: 0.35rem 0 0 0;
+            color: #475569;
+            font-size: 0.98rem;
+        }
+        .edc-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 0.9rem;
+            padding: 0.85rem 1.0rem;
+            background: #ffffff;
+            margin-bottom: 0.7rem;
+        }
+        .edc-small-muted {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        div.stButton > button {
+            border-radius: 0.75rem;
+            font-weight: 600;
+        }
+        div.stDownloadButton > button {
+            border-radius: 0.75rem;
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_card(title: str, body: str = ""):
+    """Reusable small section intro."""
+    body_html = f"<p>{body}</p>" if body else ""
+    st.markdown(
+        f"""
+        <div class="edc-card">
+            <strong>{title}</strong>
+            {body_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_dashboard_css()
+
 
 # =========================================================
 # SOURCE MODELS
@@ -148,12 +225,12 @@ def province_from_filename(filename: str) -> Optional[str]:
 @st.cache_data(show_spinner=False)
 def load_raw_csv_from_path(path_str: str, mtime: float) -> pd.DataFrame:
     # mtime is intentionally included so Streamlit invalidates cache when file changes.
-    return pd.read_csv(path_str, header=None)
+    return pd.read_csv(path_str, header=None, dtype=str, keep_default_na=False)
 
 
 @st.cache_data(show_spinner=False)
 def load_raw_csv_from_bytes(content: bytes, label: str) -> pd.DataFrame:
-    return pd.read_csv(io.BytesIO(content), header=None)
+    return pd.read_csv(io.BytesIO(content), header=None, dtype=str, keep_default_na=False)
 
 
 def build_clean_dataframe(raw: pd.DataFrame) -> pd.DataFrame:
@@ -2366,12 +2443,19 @@ def build_selected_cabin_csv_bytes(
 ) -> bytes:
     """Build one clean CSV for the selected cabin only.
 
-    It contains:
-    - yearly summary rows for 2026, 2025, 2024 when available
-    - monthly loss comparison
-    - yearly KPI comparison
+    The previous implementation used fixed part indexes to control headers,
+    which could suppress dataframe headers. This version writes each section
+    explicitly so the exported CSV is easier to read in Excel.
     """
-    parts: list[pd.DataFrame] = []
+    buffer = io.StringIO()
+
+    def _write_section(title: str, df: pd.DataFrame):
+        buffer.write(title + "\n")
+        if df is None or df.empty:
+            buffer.write("No data available\n\n")
+            return
+        df.to_csv(buffer, index=False)
+        buffer.write("\n")
 
     summary_frames = []
     for year in [2026, 2025, 2024]:
@@ -2385,25 +2469,13 @@ def build_selected_cabin_csv_bytes(
         selected_summary.insert(0, "Province", province)
         selected_summary.insert(1, "Cabin", cabin_name)
         selected_summary.insert(2, "Ranking Month", f"{ranking_month} {LATEST_YEAR}")
-        parts.append(pd.DataFrame([["SELECTED CABIN YEARLY SUMMARY"]]))
-        parts.append(selected_summary)
+    else:
+        selected_summary = pd.DataFrame()
 
-    if loss_compare_df is not None and not loss_compare_df.empty:
-        parts.append(pd.DataFrame([[]]))
-        parts.append(pd.DataFrame([["MONTHLY LOSS COMPARISON"]]))
-        parts.append(loss_compare_df)
+    _write_section("SELECTED CABIN YEARLY SUMMARY", selected_summary)
+    _write_section("MONTHLY LOSS COMPARISON", loss_compare_df)
+    _write_section("YEARLY KPI COMPARISON", yearly_kpi_df)
 
-    if yearly_kpi_df is not None and not yearly_kpi_df.empty:
-        parts.append(pd.DataFrame([[]]))
-        parts.append(pd.DataFrame([["YEARLY KPI COMPARISON"]]))
-        parts.append(yearly_kpi_df)
-
-    if not parts:
-        return b""
-
-    buffer = io.StringIO()
-    for idx, part in enumerate(parts):
-        part.to_csv(buffer, index=False, header=idx not in [1, 4, 7])
     return buffer.getvalue().encode("utf-8-sig")
 
 
@@ -2511,15 +2583,20 @@ def build_batch_pdf_reports_zip_bytes(
 # =========================================================
 # UI
 # =========================================================
-st.title("⚡ EDC Cabin Loss Dashboard")
-st.caption(
-    "2024/2025 are loaded from the GitHub repository. Upload 2026 CSV files only when running the app."
+st.markdown(
+    """
+    <div class="edc-hero">
+        <h1>⚡ EDC Cabin Loss Dashboard</h1>
+        <p>Analyze single-cabin ranking, compare 2024–2026 loss performance, and export print-ready reports.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 static_sources = build_static_sources()
 
 with st.sidebar:
-    st.header("1) Data input")
+    st.header("Data input")
     uploaded_2026_files = st.file_uploader(
         "Upload 2026 province CSV files",
         type=["csv"],
@@ -2560,14 +2637,14 @@ with st.sidebar:
         if missing_2025:
             st.write("Missing 2025: " + ", ".join(missing_2025))
 
-    st.header("2) Analysis controls")
+    st.header("Analysis controls")
     available_for_analysis = [p for p in PROVINCES if p in uploaded_2026_sources]
     if not available_for_analysis:
         available_for_analysis = PROVINCES
 
     province = st.selectbox("Province", available_for_analysis, index=0)
-    ranking_month = st.selectbox("Ranking month", MONTHS, index=0)
-    top_n_choice = st.selectbox("Ranking rows shown", [10, 20, 50, "All"], index=1)
+    ranking_month = st.selectbox("Ranking month", MONTHS, index=MONTHS.index("Dec") if "Dec" in MONTHS else 0)
+    top_n_choice = st.selectbox("Ranking rows shown", [10, 20, 50, "All"], index=2)
     cabin_type_filter = st.selectbox("Cabin type filter", ["All", "Single", "Multiple", "Unknown"], index=0)
 
 source_2026 = get_year_source(year_sources, 2026, province)
@@ -2618,7 +2695,20 @@ else:
 if visible_ranking_df.empty:
     st.warning("No Single cabin ranking data found for the selected province/month.")
 else:
-    st.dataframe(make_ranking_display_df(visible_ranking_df), use_container_width=True, hide_index=True)
+    st.markdown("#### Ranking overview")
+    rank_m1, rank_m2, rank_m3, rank_m4 = st.columns(4)
+    rank_m1.metric("Visible cabins", len(visible_ranking_df))
+    rank_m2.metric("Visible total gap", f"{visible_ranking_df['rank_gap'].sum():,.0f} kWh")
+    rank_m3.metric("Highest gap", f"{visible_ranking_df['rank_gap'].max():,.0f} kWh")
+    rank_m4.metric("Highest loss", f"{visible_ranking_df['rank_loss_pct'].max():.2f}%")
+
+    with st.expander("View ranking table", expanded=True):
+        st.dataframe(
+            make_ranking_display_df(visible_ranking_df),
+            use_container_width=True,
+            hide_index=True,
+            height=360,
+        )
     st.download_button(
         "Download visible ranking CSV",
         data=build_ranking_csv_bytes(visible_ranking_df),
@@ -2650,7 +2740,7 @@ else:
 
         batch_cache_key = (
             f"{province}|{ranking_month}|{batch_scope}|{len(batch_df)}|"
-            "print_ready_batch_v33_pdf_zip_only"
+            "print_ready_batch_v35_debug_convenience"
         )
 
         for state_key in [
@@ -2744,11 +2834,11 @@ elif cabin_search_key not in st.session_state:
 
 st.markdown("### Open cabin summary")
 st.caption(
-    "Type the cabin number/name for direct lookup, or use the stable ▲ / ▼ buttons beside the summary tables."
+    "Type a cabin number/name, open the top ranked cabin, or use the stable ▲ / ▼ buttons beside the summary tables."
 )
 
-# First row: typed search + availability.
-col_search, col_available = st.columns([2.4, 0.8])
+# First row: typed search + quick actions.
+col_search, col_available, col_top = st.columns([2.4, 0.8, 0.9])
 with col_search:
     st.text_input(
         "Cabin number/name",
@@ -2758,6 +2848,19 @@ with col_search:
 
 with col_available:
     st.metric("Available under filter", len(cabin_options_df))
+
+with col_top:
+    if st.button(
+        "Open top ranked",
+        use_container_width=True,
+        disabled=visible_ranking_df.empty,
+        key=f"open_top_ranked_{province}_{ranking_month}_{top_n_choice}_{cabin_type_filter}",
+    ):
+        top_key = visible_ranking_df.iloc[0]["__cabin_key"]
+        top_row = get_row_from_meta(meta_2026_indexed, top_key)
+        if top_row is not None:
+            st.session_state[pending_cabin_search_key] = str(top_row["display_name"])
+            st.rerun()
 
 # Final resolution used by the rest of the report.
 cabin_query = st.session_state.get(cabin_search_key, "")
@@ -2809,19 +2912,23 @@ for year in [2025, 2024]:
     if status_by_year.get(year) != "OK":
         st.warning(f"{year}: {status_by_year.get(year)}")
 
-st.markdown("### Yearly KPI Comparison")
-st.dataframe(format_yearly_kpi_table(yearly_kpi_df), use_container_width=True, hide_index=True)
+overview_tab, chart_tab = st.tabs(["KPI & comparison", "Charts"])
 
-st.markdown("### Monthly Loss % Comparison — 2024 / 2025 / 2026")
-st.dataframe(format_loss_comparison_table(loss_compare_df), use_container_width=True, hide_index=True)
+with overview_tab:
+    st.markdown("#### Yearly KPI Comparison")
+    st.dataframe(format_yearly_kpi_table(yearly_kpi_df), use_container_width=True, hide_index=True)
 
-st.markdown("### Loss % Trend")
-st.plotly_chart(build_multi_year_loss_chart(loss_by_year), use_container_width=True)
+    st.markdown("#### Monthly Loss % Comparison — 2024 / 2025 / 2026")
+    st.dataframe(format_loss_comparison_table(loss_compare_df), use_container_width=True, hide_index=True)
 
-st.markdown("### Sale vs Total — 2026")
-st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_container_width=True)
+with chart_tab:
+    st.markdown("#### Loss % Trend")
+    st.plotly_chart(build_multi_year_loss_chart(loss_by_year), use_container_width=True)
 
-st.markdown("### Summary Tables — Same Place, No Separate Tabs")
+    st.markdown("#### Sale vs Total — 2026")
+    st.plotly_chart(build_sale_total_chart(summary_by_year[2026], 2026), use_container_width=True)
+
+st.markdown("### Summary tables & actions")
 
 # Cabin navigation is intentionally placed beside the summary tables, not above the report.
 # IMPORTANT: The browse list follows the visible ranking table only.
@@ -2842,10 +2949,11 @@ elif browse_keys:
 else:
     current_pos = -1
 
-summary_table_col, summary_control_col = st.columns([3.2, 1.0])
+summary_table_col, summary_control_col = st.columns([3.7, 1.1])
 
 with summary_control_col:
     # Keep the browse controls visually stable while moving through ranked cabins.
+    # The content is grouped in a bordered panel, and the arrow buttons use callbacks.
     # The buttons use on_click callbacks instead of manual st.rerun(), so Streamlit
     # updates the selected cabin cleanly on the next run.
     st.markdown(
@@ -2952,7 +3060,7 @@ with summary_control_col:
         selected_report_key = (
             f"{province}|{ranking_month}|{selected_cabin_key}|"
             f"{','.join(map(str, sorted(summary_by_year.keys())))}|"
-            "print_ready_selected_v33_pdf_csv_only"
+            "print_ready_selected_v35_debug_convenience"
         )
 
         for state_key in [
@@ -3059,7 +3167,7 @@ with st.expander("Matched raw rows — 2026"):
 
 st.divider()
 
-with st.expander("Print-ready export location"):
+with st.expander("Where are the export buttons?"):
     st.write(
         "Selected cabin export is now beside the summary tables under **Print-ready report**. "
         "Batch export is now under the ranking table in **Batch print-ready PDF reports**. "
