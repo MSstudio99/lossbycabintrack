@@ -2744,7 +2744,7 @@ elif cabin_search_key not in st.session_state:
 
 st.markdown("### Open cabin summary")
 st.caption(
-    "Type the cabin number/name for direct lookup. Cabin navigation buttons are placed beside the summary tables below."
+    "Type the cabin number/name for direct lookup, or use the stable ▲ / ▼ buttons beside the summary tables."
 )
 
 # First row: typed search + availability.
@@ -2845,43 +2845,105 @@ else:
 summary_table_col, summary_control_col = st.columns([3.2, 1.0])
 
 with summary_control_col:
+    # Keep the browse controls visually stable while moving through ranked cabins.
+    # The buttons use on_click callbacks instead of manual st.rerun(), so Streamlit
+    # updates the selected cabin cleanly on the next run.
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stVerticalBlock"]:has(.browse-ranked-anchor) {
+            position: sticky;
+            top: 0.75rem;
+            z-index: 20;
+            background: white;
+            padding-top: 0.25rem;
+        }
+        </style>
+        <div class="browse-ranked-anchor"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown("#### Browse ranked cabins")
     st.caption(
-        f"Browsing follows the visible ranking list: {ranking_month} {LATEST_YEAR}, "
-        f"rows shown = {top_n_choice}."
+        f"Use ▲ / ▼ to move inside the visible ranking range: "
+        f"{ranking_month} {LATEST_YEAR}, rows shown = {top_n_choice}."
     )
+
+    def _open_ranked_cabin_at_position(target_pos: int):
+        if not browse_keys:
+            return
+        target_pos = max(0, min(len(browse_keys) - 1, int(target_pos)))
+        target_key = browse_keys[target_pos]
+        target_row = get_row_from_meta(meta_2026_indexed, target_key)
+        if target_row is not None:
+            st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
+            st.session_state[
+                f"browse_rank_pos_{province}_{ranking_month}_{top_n_choice}_{cabin_type_filter}"
+            ] = target_pos
 
     if not browse_keys:
         st.info("No visible ranking cabins to browse. Check the ranking month or selected province.")
     else:
+        browse_pos_key = f"browse_rank_pos_{province}_{ranking_month}_{top_n_choice}_{cabin_type_filter}"
+
         if selected_cabin_key in browse_keys:
-            current_rank_text = f"{current_pos + 1}/{len(browse_keys)}"
+            current_pos = browse_keys.index(selected_cabin_key)
+            st.session_state[browse_pos_key] = current_pos
         else:
-            current_rank_text = "Not in visible ranking"
+            current_pos = int(st.session_state.get(browse_pos_key, 0))
+            current_pos = max(0, min(len(browse_keys) - 1, current_pos))
+            st.session_state[browse_pos_key] = current_pos
             st.warning(
-                "The typed cabin is not inside the current visible ranking list. "
-                "Use the controls below to open a ranked cabin."
+                "The typed cabin is outside the visible ranking range. "
+                "Use ▲ / ▼ below to open a ranked cabin."
             )
 
-        st.metric("Visible rank position", current_rank_text)
+        current_key = browse_keys[current_pos]
+        current_rank_text = f"{current_pos + 1}/{len(browse_keys)}"
+        selected_rank_label = rank_label_map.get(current_key, current_key)
 
-        selected_rank_label = rank_label_map.get(browse_keys[current_pos], browse_keys[current_pos])
+        st.metric("Visible rank position", current_rank_text)
         st.caption(f"Current browse target: {selected_rank_label}")
 
-        if st.button("◀ Previous ranked cabin", key=f"summary_previous_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
-            target_pos = max(0, current_pos - 1)
-            target_key = browse_keys[target_pos]
-            target_row = get_row_from_meta(meta_2026_indexed, target_key)
-            if target_row is not None:
-                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
-                st.rerun()
+        up_col, down_col = st.columns(2)
+        with up_col:
+            st.button(
+                "▲ Up",
+                key=f"summary_rank_up_{province}_{ranking_month}_{top_n_choice}_{cabin_type_filter}",
+                use_container_width=True,
+                disabled=current_pos <= 0,
+                on_click=_open_ranked_cabin_at_position,
+                args=(current_pos - 1,),
+                help="Move to the previous/higher ranked cabin.",
+            )
+        with down_col:
+            st.button(
+                "▼ Down",
+                key=f"summary_rank_down_{province}_{ranking_month}_{top_n_choice}_{cabin_type_filter}",
+                use_container_width=True,
+                disabled=current_pos >= len(browse_keys) - 1,
+                on_click=_open_ranked_cabin_at_position,
+                args=(current_pos + 1,),
+                help="Move to the next/lower ranked cabin.",
+            )
 
-        if st.button("Next ranked cabin ▶", key=f"summary_next_ranked_cabin_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
-            target_pos = min(len(browse_keys) - 1, current_pos + 1)
-            target_key = browse_keys[target_pos]
-            target_row = get_row_from_meta(meta_2026_indexed, target_key)
-            if target_row is not None:
-                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
+        with st.expander("Jump to a ranked cabin", expanded=False):
+            ranked_choice_key = st.selectbox(
+                "Choose visible ranked cabin",
+                options=browse_keys,
+                index=current_pos,
+                format_func=lambda key: rank_label_map.get(key, key),
+                key=f"summary_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}",
+            )
+
+            if st.button(
+                "Open chosen ranked cabin",
+                key=f"summary_open_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}",
+                use_container_width=True,
+            ):
+                jump_pos = browse_keys.index(ranked_choice_key)
+                _open_ranked_cabin_at_position(jump_pos)
                 st.rerun()
 
         st.markdown("#### Print-ready report")
@@ -2981,20 +3043,6 @@ with summary_control_col:
                 use_container_width=True,
                 key=f"download_selected_csv_{province}_{ranking_month}_{selected_cabin_key}",
             )
-
-        ranked_choice_key = st.selectbox(
-            "Choose visible ranked cabin",
-            options=browse_keys,
-            index=current_pos if current_pos >= 0 else 0,
-            format_func=lambda key: rank_label_map.get(key, key),
-            key=f"summary_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}_{selected_cabin_key}",
-        )
-
-        if st.button("Open chosen ranked cabin", key=f"summary_open_visible_rank_choice_{province}_{ranking_month}_{top_n_choice}", use_container_width=True):
-            target_row = get_row_from_meta(meta_2026_indexed, ranked_choice_key)
-            if target_row is not None:
-                st.session_state[pending_cabin_search_key] = str(target_row["display_name"])
-                st.rerun()
 
 with summary_table_col:
     for year in [2026, 2025, 2024]:
